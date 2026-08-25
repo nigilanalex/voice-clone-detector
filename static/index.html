@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Screen uploaded recordings and live microphone audio for signs of AI-generated or cloned speech.">
+    <meta name="theme-color" content="#07111f">
+    <meta name="color-scheme" content="dark">
+    <title>VoiceGuard AI — Voice clone detection</title>
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/app.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <header class="site-header">
+        <div class="shell header-inner">
+            <a class="brand" href="/" aria-label="VoiceGuard AI home">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" role="img">
+                        <path d="M16 2.8 27 7v7.8c0 7-4.5 12.1-11 14.4C9.5 26.9 5 21.8 5 14.8V7l11-4.2Z"/>
+                        <path class="brand-wave" d="M9.5 16h2l1.5-4.2 2.6 8.4 2.2-6.4 1.5 2.2h3.2"/>
+                    </svg>
+                </span>
+                <span>
+                    <strong>VoiceGuard</strong>
+                    <small>AI voice screening</small>
+                </span>
+            </a>
+
+            <div class="header-actions">
+                <div class="service-state" id="service-state" title="Detector service status">
+                    <span class="state-dot" aria-hidden="true"></span>
+                    <span id="service-state-text">Checking service</span>
+                </div>
+                <button class="button button-quiet install-button" id="install-button" type="button" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/>
+                    </svg>
+                    Install app
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main id="main-content">
+        <section class="hero shell" aria-labelledby="hero-title">
+            <div class="hero-copy">
+                <div class="eyebrow"><span></span> AI voice authenticity screening</div>
+                <h1 id="hero-title">Hear what humans <em>might miss.</em></h1>
+                <p class="hero-lede">
+                    Screen recordings or listen through your microphone for patterns associated
+                    with AI-generated and cloned speech. Get a clear risk score in seconds.
+                </p>
+                <div class="hero-meta" aria-label="Product features">
+                    <span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+                        No recordings stored
+                    </span>
+                    <span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 2.9 7.8 7 9.3 4.1-1.5 7-4.8 7-9.3V6l-7-3Z"/></svg>
+                        Probabilistic screening
+                    </span>
+                    <span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+                        Live rolling analysis
+                    </span>
+                </div>
+            </div>
+
+            <div class="hero-visual" aria-hidden="true">
+                <div class="orb orb-one"></div>
+                <div class="orb orb-two"></div>
+                <div class="voice-card">
+                    <div class="voice-card-top">
+                        <span>VOICE SIGNAL</span>
+                        <i></i>
+                    </div>
+                    <div class="hero-wave">
+                        <span></span><span></span><span></span><span></span><span></span>
+                        <span></span><span></span><span></span><span></span><span></span>
+                        <span></span><span></span><span></span><span></span><span></span>
+                        <span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="voice-card-result">
+                        <span class="mini-shield">
+                            <svg viewBox="0 0 24 24"><path d="M12 2.8 20 6v5.6c0 5-3.3 8.8-8 10.4-4.7-1.6-8-5.4-8-10.4V6l8-3.2Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>
+                        </span>
+                        <span><small>ANALYSIS READY</small><strong>Check a voice</strong></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="analysis-section" aria-labelledby="analysis-title">
+            <div class="shell">
+                <div class="section-heading">
+                    <div>
+                        <span class="section-kicker">Start an analysis</span>
+                        <h2 id="analysis-title">Choose how you want to listen</h2>
+                    </div>
+                    <p>Use a clear speech sample of at least five seconds for the most useful result.</p>
+                </div>
+
+                <div class="analysis-grid">
+                    <article class="tool-card upload-card" id="upload-card">
+                        <div class="card-heading">
+                            <span class="card-icon blue" aria-hidden="true">
+                                <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M5 14v5h14v-5"/></svg>
+                            </span>
+                            <div>
+                                <span class="card-number">01 · RECORDING</span>
+                                <h3>Check an audio file</h3>
+                            </div>
+                        </div>
+                        <p class="card-intro">Upload a voice note, recording, or exported call audio for a full scan.</p>
+
+                        <form id="upload-form" novalidate>
+                            <input
+                                id="audio-input"
+                                class="visually-hidden"
+                                type="file"
+                                accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/flac,audio/ogg"
+                            >
+                            <label class="dropzone" id="dropzone" for="audio-input">
+                                <span class="upload-illustration" aria-hidden="true">
+                                    <svg viewBox="0 0 48 48"><path d="M14 37h21a9 9 0 0 0 1.3-17.9A13 13 0 0 0 11.2 17 10 10 0 0 0 14 37Z"/><path d="M24 31V18m0 0-5 5m5-5 5 5"/></svg>
+                                </span>
+                                <strong>Drop your recording here</strong>
+                                <span>or <u>browse your device</u></span>
+                                <small>WAV, MP3, M4A, AAC, FLAC, OGG or OPUS · max 25 MB</small>
+                            </label>
+
+                            <div class="selected-file" id="selected-file" hidden>
+                                <span class="file-type" id="file-type">WAV</span>
+                                <div class="file-copy">
+                                    <strong id="file-name">recording.wav</strong>
+                                    <span id="file-meta">Ready to analyze</span>
+                                </div>
+                                <button class="icon-button" id="remove-file" type="button" aria-label="Remove selected recording">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+                                </button>
+                                <audio id="audio-preview" preload="metadata"></audio>
+                            </div>
+
+                            <div class="inline-message error-message" id="file-error" role="alert" tabindex="-1" hidden></div>
+
+                            <button class="button button-primary action-button" id="analyze-button" type="submit" disabled>
+                                <span class="button-label">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h3l2-6 4 12 2.5-7H20"/></svg>
+                                    Analyze recording
+                                </span>
+                                <span class="button-loading" hidden>
+                                    <span class="spinner" aria-hidden="true"></span>
+                                    <span id="upload-loading-text">Analyzing voice…</span>
+                                </span>
+                            </button>
+                        </form>
+
+                        <section class="result-panel" id="file-result" aria-live="polite" hidden>
+                            <div class="result-top">
+                                <div class="score-ring" id="file-score-ring" role="img" aria-label="Synthetic voice risk score">
+                                    <div><strong id="file-score">—</strong><small>AI risk</small></div>
+                                </div>
+                                <div class="result-copy">
+                                    <span class="verdict neutral" id="file-verdict">Waiting</span>
+                                    <h4 id="file-result-title">Analysis result</h4>
+                                    <p id="file-summary"></p>
+                                </div>
+                            </div>
+                            <dl class="metrics" id="file-metrics">
+                                <div><dt>Model confidence</dt><dd id="metric-confidence">—</dd></div>
+                                <div><dt>Audio quality</dt><dd id="metric-quality">—</dd></div>
+                                <div><dt>Analyzed audio</dt><dd id="metric-duration">—</dd></div>
+                                <div><dt>Analysis windows</dt><dd id="metric-windows">—</dd></div>
+                            </dl>
+                            <p class="result-note">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 11v5m0-8v.1"/></svg>
+                                This is a screening result, not proof of identity. Verify suspicious callers independently.
+                            </p>
+                        </section>
+                    </article>
+
+                    <article class="tool-card live-card" id="live-card">
+                        <div class="card-heading">
+                            <span class="card-icon violet" aria-hidden="true">
+                                <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg>
+                            </span>
+                            <div>
+                                <span class="card-number">02 · LIVE AUDIO</span>
+                                <h3>Monitor your microphone</h3>
+                            </div>
+                            <span class="live-chip" id="live-chip"><i></i><span>Standby</span></span>
+                        </div>
+                        <p class="card-intro">Listen to nearby speech in rolling five-second windows and see the risk update.</p>
+
+                        <div class="live-display">
+                            <div class="live-display-head">
+                                <span id="live-state-text">Ready when you are</span>
+                                <time id="live-timer" datetime="PT0S">00:00</time>
+                            </div>
+                            <div class="waveform" id="waveform" aria-hidden="true"></div>
+                            <div class="mic-level" role="progressbar" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                                <span id="mic-level-bar"></span>
+                            </div>
+                            <div class="live-result-row">
+                                <div>
+                                    <small>CURRENT ASSESSMENT</small>
+                                    <strong id="live-verdict">Waiting for audio</strong>
+                                </div>
+                                <div class="live-score">
+                                    <strong id="live-score">—</strong>
+                                    <span>AI risk</span>
+                                </div>
+                            </div>
+                            <p class="live-summary" id="live-summary">Start monitoring, then play or speak a clear voice near this device.</p>
+                        </div>
+
+                        <div class="inline-message error-message" id="live-error" role="alert" tabindex="-1" hidden></div>
+
+                        <button class="button button-live action-button" id="live-button" type="button" aria-pressed="false">
+                            <span class="button-label">
+                                <span class="record-dot" aria-hidden="true"></span>
+                                Start live microphone
+                            </span>
+                            <span class="button-loading" hidden>
+                                <span class="spinner" aria-hidden="true"></span>
+                                Connecting…
+                            </span>
+                        </button>
+
+                        <p class="privacy-line">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                            Audio is streamed to your detector server for analysis and is not saved by this app.
+                        </p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="mobile-section shell" aria-labelledby="mobile-title">
+            <div class="mobile-panel">
+                <div class="mobile-copy">
+                    <span class="section-kicker">Mobile call safety</span>
+                    <h2 id="mobile-title">Use VoiceGuard on the go</h2>
+                    <p>
+                        Install this site as a mobile app and use the live microphone checker in the
+                        foreground. For a normal phone call, put the call on speaker and run
+                        VoiceGuard on a <strong>second device</strong>.
+                    </p>
+                    <button class="button button-secondary install-button" id="install-button-mobile" type="button" hidden>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+                        Install VoiceGuard
+                    </button>
+                    <div class="platform-tip" id="platform-tip">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 11v5m0-8v.1"/></svg>
+                        <span>Open this page on your phone over HTTPS to enable microphone access and installation.</span>
+                    </div>
+                </div>
+
+                <div class="phone-demo" aria-hidden="true">
+                    <div class="phone-speaker"></div>
+                    <div class="phone-ui">
+                        <span class="phone-brand">VoiceGuard</span>
+                        <div class="phone-rings"><i></i><i></i><i></i><b><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11a6 6 0 0 0 12 0"/></svg></b></div>
+                        <small>LISTENING</small>
+                        <strong>Live protection</strong>
+                        <div class="phone-wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="capability-note">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v5.5c0 5 3.2 8.7 8 10.5 4.8-1.8 8-5.5 8-10.5V6l-8-3Z"/><path d="M9 12h6m-3-3v6"/></svg>
+                <div>
+                    <strong>Why a second device?</strong>
+                    <p>
+                        Android and iOS prevent ordinary websites and apps from intercepting cellular-call
+                        audio. Direct analysis is possible only when audio belongs to an app's own VoIP call.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="how-section" aria-labelledby="how-title">
+            <div class="shell">
+                <div class="section-heading compact">
+                    <div>
+                        <span class="section-kicker">Inside the detector</span>
+                        <h2 id="how-title">How the screening works</h2>
+                    </div>
+                </div>
+                <ol class="steps">
+                    <li>
+                        <span>01</span>
+                        <div><strong>Prepare</strong><p>Audio is converted to mono 16 kHz speech for consistent analysis.</p></div>
+                    </li>
+                    <li>
+                        <span>02</span>
+                        <div><strong>Inspect</strong><p>A Wav2Vec2 classifier checks several windows for learned synthetic patterns.</p></div>
+                    </li>
+                    <li>
+                        <span>03</span>
+                        <div><strong>Assess</strong><p>Window scores and audio quality become a clear, probabilistic risk result.</p></div>
+                    </li>
+                </ol>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="shell footer-inner">
+            <div class="brand footer-brand">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 32 32"><path d="M16 2.8 27 7v7.8c0 7-4.5 12.1-11 14.4C9.5 26.9 5 21.8 5 14.8V7l11-4.2Z"/><path class="brand-wave" d="M9.5 16h2l1.5-4.2 2.6 8.4 2.2-6.4 1.5 2.2h3.2"/></svg>
+                </span>
+                <span><strong>VoiceGuard</strong><small>Use signals, not assumptions.</small></span>
+            </div>
+            <p>VoiceGuard provides decision support only. Never use one automated score as proof of identity or fraud.</p>
+        </div>
+    </footer>
+
+    <noscript>
+        <div class="noscript">VoiceGuard needs JavaScript to upload and stream audio.</div>
+    </noscript>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+    "id": "/",
+    "name": "VoiceGuard AI",
+    "short_name": "VoiceGuard",
+    "description": "Screen recordings and live microphone audio for signs of AI-generated or cloned speech.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "any",
+    "background_color": "#07111f",
+    "theme_color": "#07111f",
+    "categories": ["security", "utilities"],
+    "icons": [
+        {
+            "src": "/static/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Analyze a recording",
+            "short_name": "Upload",
+            "url": "/#upload-card",
+            "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+        },
+        {
+            "name": "Live microphone",
+            "short_name": "Live check",
+            "url": "/#live-card",
+            "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+        }
+    ]
+}

@@ -1,0 +1,742 @@
+(() => {
+    "use strict";
+
+    const MAX_FILE_BYTES = 25 * 1024 * 1024;
+    const ALLOWED_EXTENSIONS = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus"]);
+    const TARGET_SAMPLE_RATE = 16000;
+    const WS_BACKPRESSURE_LIMIT = 256 * 1024;
+
+    const $ = (id) => document.getElementById(id);
+    const elements = {
+        serviceState: $("service-state"),
+        serviceStateText: $("service-state-text"),
+        uploadForm: $("upload-form"),
+        audioInput: $("audio-input"),
+        dropzone: $("dropzone"),
+        selectedFile: $("selected-file"),
+        fileType: $("file-type"),
+        fileName: $("file-name"),
+        fileMeta: $("file-meta"),
+        removeFile: $("remove-file"),
+        audioPreview: $("audio-preview"),
+        analyzeButton: $("analyze-button"),
+        uploadLoadingText: $("upload-loading-text"),
+        fileError: $("file-error"),
+        fileResult: $("file-result"),
+        fileScoreRing: $("file-score-ring"),
+        fileScore: $("file-score"),
+        fileVerdict: $("file-verdict"),
+        fileResultTitle: $("file-result-title"),
+        fileSummary: $("file-summary"),
+        metricConfidence: $("metric-confidence"),
+        metricQuality: $("metric-quality"),
+        metricDuration: $("metric-duration"),
+        metricWindows: $("metric-windows"),
+        liveButton: $("live-button"),
+        liveChip: $("live-chip"),
+        liveStateText: $("live-state-text"),
+        liveTimer: $("live-timer"),
+        waveform: $("waveform"),
+        micLevel: document.querySelector(".mic-level"),
+        micLevelBar: $("mic-level-bar"),
+        liveVerdict: $("live-verdict"),
+        liveScore: $("live-score"),
+        liveSummary: $("live-summary"),
+        liveError: $("live-error"),
+        installButtons: [...document.querySelectorAll(".install-button")],
+        platformTip: $("platform-tip"),
+    };
+
+    const uploadState = {
+        file: null,
+        previewUrl: null,
+        controller: null,
+        modelReady: false,
+    };
+
+    const liveState = {
+        running: false,
+        starting: false,
+        stopping: false,
+        socket: null,
+        stream: null,
+        context: null,
+        source: null,
+        processor: null,
+        silentGain: null,
+        timerId: null,
+        startedAt: 0,
+        recentScores: [],
+        resampleState: { buffer: new Float32Array(0), position: 0 },
+    };
+
+    let deferredInstallPrompt = null;
+
+    function formatBytes(bytes) {
+        if (!Number.isFinite(bytes)) return "Unknown size";
+        if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function formatDuration(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) return "";
+        const rounded = Math.round(seconds);
+        const minutes = Math.floor(rounded / 60);
+        return `${minutes}:${String(rounded % 60).padStart(2, "0")}`;
+    }
+
+    function getExtension(filename) {
+        return filename.includes(".") ? filename.split(".").pop().toLowerCase() : "";
+    }
+
+    function showMessage(element, message) {
+        element.textContent = message;
+        element.hidden = false;
+        element.focus({ preventScroll: true });
+    }
+
+    function hideMessage(element) {
+        element.hidden = true;
+        element.textContent = "";
+    }
+
+    function setButtonLoading(button, loading) {
+        const label = button.querySelector(".button-label");
+        const loadingLabel = button.querySelector(".button-loading");
+        if (label) label.hidden = loading;
+        if (loadingLabel) loadingLabel.hidden = !loading;
+        button.setAttribute("aria-busy", String(loading));
+    }
+
+    function resultTone(status, score) {
+        const normalized = String(status || "").toUpperCase();
+        if (normalized.includes("SYNTHETIC") || (Number.isFinite(score) && score >= 70)) {
+            return { className: "synthetic", color: "#ff667e" };
+        }
+        if (normalized.includes("UNCERTAIN") || (Number.isFinite(score) && score >= 40)) {
+            return { className: "uncertain", color: "#ffbd5c" };
+        }
+        if (normalized.includes("HUMAN")) {
+            return { className: "human", color: "#3ee6a1" };
+        }
+        return { className: "neutral", color: "#6b8098" };
+    }
+
+    async function parseError(response) {
+        try {
+            const payload = await response.json();
+            return payload?.detail?.message
+                || payload?.error?.message
+                || (typeof payload?.detail === "string" ? payload.detail : null)
+                || `Request failed with status ${response.status}.`;
+        } catch {
+            return `Request failed with status ${response.status}.`;
+        }
+    }
+
+    async function checkService() {
+        try {
+            const response = await fetch("/api/health", {
+                headers: { Accept: "application/json" },
+                cache: "no-store",
+            });
+            if (!response.ok) throw new Error("Health check failed");
+            const payload = await response.json();
+            uploadState.modelReady = Boolean(payload?.model?.ready);
+            elements.serviceState.classList.add("online");
+            elements.serviceState.classList.remove("offline");
+            elements.serviceStateText.textContent = uploadState.modelReady
+                ? "Detector ready"
+                : "Service online";
+            elements.serviceState.title = uploadState.modelReady
+                ? "Detector model is loaded"
+                : "The detector model will load during the first analysis";
+        } catch {
+            elements.serviceState.classList.add("offline");
+            elements.serviceState.classList.remove("online");
+            elements.serviceStateText.textContent = "Service offline";
+            elements.serviceState.title = "Start the VoiceGuard server to analyze audio";
+        }
+    }
+
+    function clearSelectedFile() {
+        if (uploadState.controller) {
+            uploadState.controller.abort();
+            uploadState.controller = null;
+        }
+        if (uploadState.previewUrl) {
+            URL.revokeObjectURL(uploadState.previewUrl);
+            uploadState.previewUrl = null;
+        }
+        uploadState.file = null;
+        elements.audioInput.value = "";
+        elements.audioPreview.removeAttribute("src");
+        elements.selectedFile.hidden = true;
+        elements.dropzone.hidden = false;
+        elements.analyzeButton.disabled = true;
+        elements.fileResult.hidden = true;
+        hideMessage(elements.fileError);
+        setButtonLoading(elements.analyzeButton, false);
+    }
+
+    function selectFile(file) {
+        hideMessage(elements.fileError);
+        elements.fileResult.hidden = true;
+
+        const extension = getExtension(file?.name || "");
+        if (!file || !ALLOWED_EXTENSIONS.has(extension)) {
+            showMessage(
+                elements.fileError,
+                "Choose a WAV, MP3, M4A, AAC, FLAC, OGG, or OPUS recording."
+            );
+            return;
+        }
+        if (file.size <= 0) {
+            showMessage(elements.fileError, "This recording is empty.");
+            return;
+        }
+        if (file.size > MAX_FILE_BYTES) {
+            showMessage(elements.fileError, "The recording must be 25 MB or smaller.");
+            return;
+        }
+
+        if (uploadState.previewUrl) URL.revokeObjectURL(uploadState.previewUrl);
+        uploadState.file = file;
+        uploadState.previewUrl = URL.createObjectURL(file);
+        elements.audioPreview.src = uploadState.previewUrl;
+        elements.fileType.textContent = extension.toUpperCase().slice(0, 4);
+        elements.fileName.textContent = file.name;
+        elements.fileMeta.textContent = `${formatBytes(file.size)} · Reading duration…`;
+        elements.dropzone.hidden = true;
+        elements.selectedFile.hidden = false;
+        elements.analyzeButton.disabled = false;
+
+        elements.audioPreview.onloadedmetadata = () => {
+            const duration = elements.audioPreview.duration;
+            const durationText = Number.isFinite(duration) ? ` · ${formatDuration(duration)}` : "";
+            elements.fileMeta.textContent = `${formatBytes(file.size)}${durationText} · Ready to analyze`;
+        };
+        elements.audioPreview.onerror = () => {
+            elements.fileMeta.textContent = `${formatBytes(file.size)} · Server will verify this format`;
+        };
+    }
+
+    function renderFileResult(analysis, filename) {
+        const score = Number.isFinite(analysis.risk_score) ? analysis.risk_score : null;
+        const tone = resultTone(analysis.status, score);
+        elements.fileScore.textContent = score === null ? "—" : `${Math.round(score)}%`;
+        elements.fileScoreRing.style.setProperty("--score", score ?? 0);
+        elements.fileScoreRing.style.setProperty("--ring-color", tone.color);
+        elements.fileScoreRing.setAttribute(
+            "aria-label",
+            score === null ? "No synthetic voice risk score" : `${score} percent synthetic voice risk`
+        );
+        elements.fileVerdict.className = `verdict ${tone.className}`;
+        elements.fileVerdict.textContent = analysis.status || "Analysis complete";
+        elements.fileResultTitle.textContent = score === null
+            ? "More speech needed"
+            : filename || "Analysis result";
+        elements.fileSummary.textContent = analysis.summary || "The recording has been screened.";
+        elements.metricConfidence.textContent = Number.isFinite(analysis.confidence_score)
+            ? `${analysis.confidence_score}%`
+            : "Not available";
+        elements.metricQuality.textContent = String(
+            analysis.audio_quality?.quality || "unknown"
+        ).replaceAll("_", " ");
+        elements.metricDuration.textContent = Number.isFinite(analysis.audio_quality?.duration_seconds)
+            ? formatDuration(analysis.audio_quality.duration_seconds)
+            : "—";
+        elements.metricWindows.textContent = String(analysis.analysis_windows ?? "—");
+        elements.fileResult.hidden = false;
+        elements.fileResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    async function analyzeSelectedFile(event) {
+        event.preventDefault();
+        if (!uploadState.file || uploadState.controller) return;
+
+        hideMessage(elements.fileError);
+        elements.fileResult.hidden = true;
+        uploadState.controller = new AbortController();
+        elements.analyzeButton.disabled = true;
+        elements.uploadLoadingText.textContent = uploadState.modelReady
+            ? "Analyzing voice…"
+            : "Preparing model & analyzing…";
+        setButtonLoading(elements.analyzeButton, true);
+
+        const body = new FormData();
+        body.append("file", uploadState.file);
+
+        try {
+            const response = await fetch("/api/analyze-file", {
+                method: "POST",
+                body,
+                signal: uploadState.controller.signal,
+            });
+            if (!response.ok) throw new Error(await parseError(response));
+            const payload = await response.json();
+            uploadState.modelReady = true;
+            renderFileResult(payload.analysis, payload.filename);
+            elements.serviceStateText.textContent = "Detector ready";
+            elements.serviceState.title = "Detector model is loaded";
+        } catch (error) {
+            if (error.name !== "AbortError") {
+                showMessage(
+                    elements.fileError,
+                    error.message || "The recording could not be analyzed. Please try again."
+                );
+            }
+        } finally {
+            uploadState.controller = null;
+            setButtonLoading(elements.analyzeButton, false);
+            elements.analyzeButton.disabled = !uploadState.file;
+        }
+    }
+
+    function createWaveform() {
+        const fragment = document.createDocumentFragment();
+        for (let index = 0; index < 38; index += 1) {
+            fragment.appendChild(document.createElement("span"));
+        }
+        elements.waveform.appendChild(fragment);
+    }
+
+    function updateMicVisual(pcm) {
+        let sum = 0;
+        for (let index = 0; index < pcm.length; index += 1) {
+            const value = pcm[index] / 32768;
+            sum += value * value;
+        }
+        const rms = Math.sqrt(sum / Math.max(1, pcm.length));
+        const level = Math.min(100, Math.max(0, (20 * Math.log10(Math.max(rms, 0.0001)) + 60) * 1.8));
+        elements.micLevelBar.style.width = `${level}%`;
+        elements.micLevel.setAttribute("aria-valuenow", String(Math.round(level)));
+
+        const bars = elements.waveform.children;
+        const time = performance.now() / 150;
+        for (let index = 0; index < bars.length; index += 1) {
+            const shape = 0.24 + 0.76 * Math.abs(Math.sin(index * 0.71 + time));
+            const height = 4 + level * 0.58 * shape;
+            bars[index].style.height = `${Math.min(62, height)}px`;
+        }
+    }
+
+    function sendPcm(pcm) {
+        if (!(pcm instanceof Int16Array) || pcm.length === 0) return;
+        updateMicVisual(pcm);
+        const socket = liveState.socket;
+        if (
+            socket?.readyState === WebSocket.OPEN
+            && socket.bufferedAmount < WS_BACKPRESSURE_LIMIT
+        ) {
+            socket.send(pcm.buffer);
+        }
+    }
+
+    function resampleForFallback(input, sourceRate) {
+        if (sourceRate === TARGET_SAMPLE_RATE) {
+            const pcm = new Int16Array(input.length);
+            for (let index = 0; index < input.length; index += 1) {
+                const sample = Math.max(-1, Math.min(1, input[index]));
+                pcm[index] = sample < 0 ? sample * 32768 : sample * 32767;
+            }
+            return pcm;
+        }
+
+        const prior = liveState.resampleState.buffer;
+        const combined = new Float32Array(prior.length + input.length);
+        combined.set(prior);
+        combined.set(input, prior.length);
+        const ratio = sourceRate / TARGET_SAMPLE_RATE;
+        let position = liveState.resampleState.position;
+        const output = [];
+
+        while (position + 1 < combined.length) {
+            const left = Math.floor(position);
+            const fraction = position - left;
+            const sample = combined[left] * (1 - fraction) + combined[left + 1] * fraction;
+            output.push(Math.max(-1, Math.min(1, sample)));
+            position += ratio;
+        }
+
+        const consumed = Math.floor(position);
+        liveState.resampleState.buffer = combined.slice(consumed);
+        liveState.resampleState.position = position - consumed;
+        const pcm = new Int16Array(output.length);
+        for (let index = 0; index < output.length; index += 1) {
+            pcm[index] = output[index] < 0 ? output[index] * 32768 : output[index] * 32767;
+        }
+        return pcm;
+    }
+
+    async function setupAudioGraph() {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) {
+            throw new Error("This browser does not support live audio processing.");
+        }
+
+        liveState.context = new AudioContextClass({ latencyHint: "interactive" });
+        await liveState.context.resume();
+        liveState.source = liveState.context.createMediaStreamSource(liveState.stream);
+        liveState.silentGain = liveState.context.createGain();
+        liveState.silentGain.gain.value = 0;
+        liveState.silentGain.connect(liveState.context.destination);
+
+        if (liveState.context.audioWorklet && window.AudioWorkletNode) {
+            await liveState.context.audioWorklet.addModule("/static/pcm-worklet.js");
+            liveState.processor = new AudioWorkletNode(
+                liveState.context,
+                "voiceguard-pcm-processor",
+                { processorOptions: { targetSampleRate: TARGET_SAMPLE_RATE } }
+            );
+            liveState.processor.port.onmessage = (event) => {
+                if (event.data?.type === "pcm") sendPcm(event.data.samples);
+            };
+        } else {
+            const processor = liveState.context.createScriptProcessor(4096, 1, 1);
+            processor.onaudioprocess = (event) => {
+                const input = event.inputBuffer.getChannelData(0);
+                sendPcm(resampleForFallback(input, liveState.context.sampleRate));
+            };
+            liveState.processor = processor;
+        }
+
+        liveState.source.connect(liveState.processor);
+        liveState.processor.connect(liveState.silentGain);
+    }
+
+    function openSocket() {
+        return new Promise((resolve, reject) => {
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const socket = new WebSocket(`${protocol}//${window.location.host}/ws/stream`);
+            socket.binaryType = "arraybuffer";
+            liveState.socket = socket;
+            const timeout = window.setTimeout(() => {
+                reject(new Error("The detector server took too long to connect."));
+                socket.close();
+            }, 15000);
+
+            socket.onopen = () => {
+                window.clearTimeout(timeout);
+                socket.send(JSON.stringify({
+                    type: "start",
+                    format: "pcm_s16le",
+                    sample_rate: TARGET_SAMPLE_RATE,
+                    channels: 1,
+                }));
+                resolve();
+            };
+            socket.onerror = () => {
+                window.clearTimeout(timeout);
+                reject(new Error("Could not connect to the live detector."));
+            };
+            socket.onmessage = handleLiveMessage;
+            socket.onclose = () => {
+                window.clearTimeout(timeout);
+                if (liveState.running && !liveState.stopping) {
+                    stopLive("The live detector disconnected. Please start it again.");
+                }
+            };
+        });
+    }
+
+    function setLiveChip(active, label) {
+        elements.liveChip.classList.toggle("active", active);
+        const text = elements.liveChip.querySelector("span");
+        if (text) text.textContent = label;
+    }
+
+    function setLiveConnecting(connecting, message = "Requesting microphone") {
+        liveState.starting = connecting;
+        elements.liveButton.disabled = connecting;
+        setButtonLoading(elements.liveButton, connecting);
+        elements.liveStateText.textContent = message;
+        setLiveChip(false, connecting ? "Connecting" : "Standby");
+    }
+
+    function updateTimer() {
+        const elapsed = Math.max(0, Math.floor((Date.now() - liveState.startedAt) / 1000));
+        elements.liveTimer.textContent = formatDuration(elapsed);
+        elements.liveTimer.dateTime = `PT${elapsed}S`;
+    }
+
+    function renderLiveResult(payload) {
+        if (!Number.isFinite(payload.risk_score)) {
+            liveState.recentScores = [];
+            elements.liveScore.textContent = "—";
+            elements.liveVerdict.textContent = "Waiting for clear speech";
+            elements.liveSummary.textContent = payload.summary || "Move closer to the speaker and try again.";
+            return;
+        }
+
+        liveState.recentScores.push(payload.risk_score);
+        if (liveState.recentScores.length > 3) liveState.recentScores.shift();
+        const score = liveState.recentScores.reduce((sum, value) => sum + value, 0)
+            / liveState.recentScores.length;
+        let status;
+        if (score >= 70) status = "LIKELY SYNTHETIC";
+        else if (score >= 40) status = "UNCERTAIN";
+        else status = "LIKELY HUMAN";
+        const tone = resultTone(status, score);
+
+        elements.liveScore.textContent = `${Math.round(score)}%`;
+        elements.liveScore.style.color = tone.color;
+        elements.liveVerdict.textContent = status;
+        elements.liveVerdict.style.color = tone.color;
+        elements.liveSummary.textContent = payload.summary || "Rolling analysis updated.";
+    }
+
+    function handleLiveMessage(event) {
+        let payload;
+        try {
+            payload = JSON.parse(event.data);
+        } catch {
+            showMessage(elements.liveError, "The detector returned an invalid live response.");
+            return;
+        }
+
+        if (payload.type === "state") {
+            elements.liveStateText.textContent = payload.message || payload.state;
+            if (payload.state === "loading_model") {
+                setLiveChip(true, "Loading model");
+            }
+            return;
+        }
+        if (payload.type === "error") {
+            const message = payload.error?.message || "Live analysis could not continue.";
+            if (payload.error?.code === "invalid_audio") {
+                elements.liveSummary.textContent = message;
+            } else {
+                showMessage(elements.liveError, message);
+            }
+            return;
+        }
+        if (payload.type === "result") {
+            elements.liveStateText.textContent = "Rolling five-second analysis";
+            setLiveChip(true, "Listening");
+            renderLiveResult(payload);
+        }
+    }
+
+    async function startLive() {
+        if (liveState.running || liveState.starting) return;
+        hideMessage(elements.liveError);
+        liveState.recentScores = [];
+        liveState.resampleState = { buffer: new Float32Array(0), position: 0 };
+        setLiveConnecting(true);
+
+        if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+            setLiveConnecting(false);
+            showMessage(
+                elements.liveError,
+                "Microphone access requires HTTPS or localhost in a supported browser."
+            );
+            return;
+        }
+
+        try {
+            liveState.stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: { ideal: 1 },
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                },
+                video: false,
+            });
+            elements.liveStateText.textContent = "Preparing secure audio stream";
+            await setupAudioGraph();
+            await openSocket();
+
+            liveState.running = true;
+            liveState.startedAt = Date.now();
+            liveState.timerId = window.setInterval(updateTimer, 1000);
+            updateTimer();
+            setLiveConnecting(false);
+            elements.liveButton.disabled = false;
+            elements.liveButton.classList.add("running");
+            elements.liveButton.setAttribute("aria-pressed", "true");
+            elements.liveButton.querySelector(".button-label").innerHTML =
+                '<span class="record-dot" aria-hidden="true"></span> Stop live monitoring';
+            elements.waveform.classList.add("active");
+            elements.liveStateText.textContent = "Listening for a clear speech sample";
+            elements.liveVerdict.textContent = "Collecting audio";
+            elements.liveSummary.textContent = "Rolling results begin after the detector is ready and five seconds of clear audio is collected.";
+            setLiveChip(true, "Listening");
+        } catch (error) {
+            await stopLive();
+            const denied = error?.name === "NotAllowedError";
+            showMessage(
+                elements.liveError,
+                denied
+                    ? "Microphone permission was denied. Allow access in your browser settings and try again."
+                    : (error.message || "Live microphone monitoring could not start.")
+            );
+        }
+    }
+
+    async function stopLive(errorMessage = "") {
+        if (liveState.stopping) return;
+        liveState.stopping = true;
+        const wasActive = liveState.running || liveState.starting;
+        liveState.running = false;
+        liveState.starting = false;
+
+        if (liveState.timerId) {
+            window.clearInterval(liveState.timerId);
+            liveState.timerId = null;
+        }
+
+        const socket = liveState.socket;
+        liveState.socket = null;
+        if (socket) {
+            socket.onclose = null;
+            socket.onmessage = null;
+            socket.onerror = null;
+            if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+                socket.close(1000, "User stopped monitoring");
+            }
+        }
+
+        if (liveState.processor) {
+            if (liveState.processor.port) liveState.processor.port.onmessage = null;
+            if ("onaudioprocess" in liveState.processor) liveState.processor.onaudioprocess = null;
+            try { liveState.processor.disconnect(); } catch {}
+            liveState.processor = null;
+        }
+        if (liveState.source) {
+            try { liveState.source.disconnect(); } catch {}
+            liveState.source = null;
+        }
+        if (liveState.silentGain) {
+            try { liveState.silentGain.disconnect(); } catch {}
+            liveState.silentGain = null;
+        }
+        if (liveState.stream) {
+            liveState.stream.getTracks().forEach((track) => track.stop());
+            liveState.stream = null;
+        }
+        if (liveState.context) {
+            try { await liveState.context.close(); } catch {}
+            liveState.context = null;
+        }
+
+        elements.liveButton.disabled = false;
+        elements.liveButton.classList.remove("running");
+        elements.liveButton.setAttribute("aria-pressed", "false");
+        setButtonLoading(elements.liveButton, false);
+        elements.liveButton.querySelector(".button-label").innerHTML =
+            '<span class="record-dot" aria-hidden="true"></span> Start live microphone';
+        elements.waveform.classList.remove("active");
+        [...elements.waveform.children].forEach((bar) => { bar.style.height = "4px"; });
+        elements.micLevelBar.style.width = "0%";
+        elements.micLevel.setAttribute("aria-valuenow", "0");
+        elements.liveStateText.textContent = errorMessage ? "Monitoring stopped" : "Ready when you are";
+        setLiveChip(false, "Standby");
+
+        if (wasActive && !errorMessage) {
+            elements.liveSummary.textContent = "Session stopped. Start again whenever you need another check.";
+        }
+        if (errorMessage) showMessage(elements.liveError, errorMessage);
+        liveState.stopping = false;
+    }
+
+    async function toggleLive() {
+        if (liveState.running) await stopLive();
+        else await startLive();
+    }
+
+    function setupUploadEvents() {
+        elements.audioInput.addEventListener("change", () => {
+            const [file] = elements.audioInput.files;
+            if (file) selectFile(file);
+        });
+        elements.removeFile.addEventListener("click", clearSelectedFile);
+        elements.uploadForm.addEventListener("submit", analyzeSelectedFile);
+
+        for (const eventName of ["dragenter", "dragover"]) {
+            elements.dropzone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+                elements.dropzone.classList.add("dragging");
+            });
+        }
+        for (const eventName of ["dragleave", "drop"]) {
+            elements.dropzone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                elements.dropzone.classList.remove("dragging");
+            });
+        }
+        elements.dropzone.addEventListener("drop", (event) => {
+            const [file] = event.dataTransfer?.files || [];
+            if (file) selectFile(file);
+        });
+    }
+
+    function updatePlatformTip() {
+        const standalone = window.matchMedia("(display-mode: standalone)").matches
+            || window.navigator.standalone === true;
+        const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+        const tip = elements.platformTip.querySelector("span");
+        if (standalone) {
+            tip.textContent = "VoiceGuard is installed. Keep it open in the foreground while monitoring.";
+        } else if (ios) {
+            tip.textContent = "On iPhone or iPad, tap Share, then “Add to Home Screen” to install.";
+        }
+    }
+
+    function showInstallButtons(show) {
+        elements.installButtons.forEach((button) => {
+            button.hidden = !show;
+        });
+    }
+
+    function setupPwa() {
+        if ("serviceWorker" in navigator) {
+            window.addEventListener("load", () => {
+                navigator.serviceWorker.register("/sw.js").catch(() => {});
+            });
+        }
+
+        window.addEventListener("beforeinstallprompt", (event) => {
+            event.preventDefault();
+            deferredInstallPrompt = event;
+            showInstallButtons(true);
+        });
+        window.addEventListener("appinstalled", () => {
+            deferredInstallPrompt = null;
+            showInstallButtons(false);
+            updatePlatformTip();
+        });
+        elements.installButtons.forEach((button) => {
+            button.addEventListener("click", async () => {
+                if (!deferredInstallPrompt) return;
+                deferredInstallPrompt.prompt();
+                await deferredInstallPrompt.userChoice;
+                deferredInstallPrompt = null;
+                showInstallButtons(false);
+            });
+        });
+        updatePlatformTip();
+    }
+
+    function init() {
+        createWaveform();
+        setupUploadEvents();
+        setupPwa();
+        elements.liveButton.addEventListener("click", toggleLive);
+        window.addEventListener("pagehide", () => {
+            if (liveState.running || liveState.starting) stopLive();
+            if (uploadState.previewUrl) URL.revokeObjectURL(uploadState.previewUrl);
+        });
+        window.addEventListener("online", checkService);
+        window.addEventListener("offline", () => {
+            elements.serviceState.classList.add("offline");
+            elements.serviceState.classList.remove("online");
+            elements.serviceStateText.textContent = "Offline";
+        });
+        checkService();
+    }
+
+    init();
+})();
