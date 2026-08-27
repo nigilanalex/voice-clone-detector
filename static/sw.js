@@ -1,11 +1,18 @@
-const CACHE_NAME = "voiceguard-shell-v5";
+const CACHE_NAME = "voiceguard-shell-v6";
 const APP_SHELL = [
     "/",
     "/static/styles.css",
     "/static/app.js",
     "/static/pcm-worklet.js",
     "/static/manifest.webmanifest",
-    "/static/icon.svg"
+    "/static/icon.svg",
+    "/static/icon-192.png",
+    "/static/icon-512.png",
+    "/static/apple-touch-icon.png",
+    "/static/legal.css",
+    "/privacy",
+    "/consent",
+    "/disclaimer"
 ];
 
 self.addEventListener("install", (event) => {

@@ -8,7 +8,7 @@
     <meta name="color-scheme" content="dark">
     <title>VoiceGuard AI — Voice clone detection</title>
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.webmanifest">
     <link rel="stylesheet" href="/static/styles.css">
     <script src="/static/app.js" defer></script>
@@ -103,6 +103,14 @@
                         <h2 id="analysis-title">Choose how you want to listen</h2>
                     </div>
                     <p>Use a clear speech sample of at least five seconds for the most useful result.</p>
+                </div>
+
+                <div class="consent-panel">
+                    <input id="consent-checkbox" type="checkbox">
+                    <label for="consent-checkbox">
+                        <strong>I have permission to analyze this audio.</strong>
+                        <span>I understand VoiceGuard is probabilistic screening, not proof. Review the <a href="/consent">consent notice</a>, <a href="/privacy">privacy policy</a>, and <a href="/disclaimer">limitations</a>.</span>
+                    </label>
                 </div>
 
                 <div class="analysis-grid">
@@ -369,6 +377,11 @@
                 <span><strong>VoiceGuard</strong><small>Use signals, not assumptions.</small></span>
             </div>
             <p>VoiceGuard provides decision support only. Never use one automated score as proof of identity or fraud.</p>
+            <nav class="footer-links" aria-label="Legal information">
+                <a href="/privacy">Privacy</a>
+                <a href="/consent">Consent</a>
+                <a href="/disclaimer">Disclaimer</a>
+            </nav>
         </div>
     </footer>
 

@@ -1739,6 +1739,36 @@ footer {
 .history-verdict.uncertain { color: #ffbd5c; }
 .history-verdict.human { color: #3ee6a1; }
 
+.consent-panel {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0 0 20px;
+    padding: 15px 17px;
+    border: 1px solid rgba(101, 174, 255, 0.22);
+    border-radius: 15px;
+    background: rgba(101, 174, 255, 0.06);
+}
+
+.consent-panel input {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    accent-color: #65aeff;
+}
+
+.consent-panel label { display: grid; gap: 4px; cursor: pointer; }
+.consent-panel strong { font-size: 12px; }
+.consent-panel span { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.consent-panel a,
+.footer-links a { color: #76bdff; }
+
+.footer-links {
+    display: flex;
+    gap: 13px;
+    font-size: 11px;
+}
+
 @keyframes spin {
     to { transform: rotate(360deg); }
 }

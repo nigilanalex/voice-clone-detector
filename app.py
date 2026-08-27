@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import json
 import os
+import time
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -56,21 +58,75 @@ def positive_env_int(name: str, default: int) -> int:
 MAX_CONCURRENT_INFERENCES = positive_env_int(
     "VOICEGUARD_MAX_CONCURRENT_INFERENCES", 1
 )
+UPLOAD_RATE_LIMIT = positive_env_int("VOICEGUARD_UPLOADS_PER_5_MINUTES", 12)
+WEBSOCKET_RATE_LIMIT = positive_env_int("VOICEGUARD_STREAMS_PER_MINUTE", 8)
+
+
+class SlidingWindowRateLimiter:
+    """Small single-worker limiter for expensive public demo endpoints."""
+
+    def __init__(self) -> None:
+        self._events: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = asyncio.Lock()
+
+    async def allow(self, key: str, limit: int, window_seconds: int) -> bool:
+        cutoff = time.monotonic() - window_seconds
+        async with self._lock:
+            events = self._events[key]
+            while events and events[0] <= cutoff:
+                events.popleft()
+            if len(events) >= limit:
+                return False
+            events.append(time.monotonic())
+            return True
 
 app = FastAPI(
     title="VoiceGuard AI",
     description="Probabilistic AI-generated voice screening for recordings and live microphone audio.",
-    version="1.2.0",
+    version="1.3.0",
 )
 detector = VoiceCloneDetector()
 inference_slots = asyncio.Semaphore(MAX_CONCURRENT_INFERENCES)
+rate_limiter = SlidingWindowRateLimiter()
+model_warmup_task: asyncio.Task[None] | None = None
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def client_key(headers: Any, fallback: str | None) -> str:
+    forwarded = headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    return forwarded or fallback or "unknown"
+
+
+async def warm_model() -> None:
+    try:
+        await run_inference(detector.load)
+    except ModelLoadError:
+        # Readiness exposes the load error without preventing the UI from starting.
+        return
+
+
+@app.on_event("startup")
+async def start_model_warmup() -> None:
+    global model_warmup_task
+    model_warmup_task = asyncio.create_task(warm_model())
 
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Apply a conservative browser policy to every HTTP response."""
+
+    if request.url.path == "/api/analyze-file":
+        key = client_key(request.headers, request.client.host if request.client else None)
+        if not await rate_limiter.allow(f"upload:{key}", UPLOAD_RATE_LIMIT, 300):
+            return JSONResponse(
+                status_code=429,
+                content=error_payload(
+                    "rate_limited",
+                    "Too many analyses from this device. Wait a few minutes and try again.",
+                ),
+                headers={"Retry-After": "300"},
+            )
 
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -119,6 +175,21 @@ async def get_index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/privacy", include_in_schema=False)
+async def get_privacy() -> FileResponse:
+    return FileResponse(STATIC_DIR / "privacy.html")
+
+
+@app.get("/consent", include_in_schema=False)
+async def get_consent() -> FileResponse:
+    return FileResponse(STATIC_DIR / "consent.html")
+
+
+@app.get("/disclaimer", include_in_schema=False)
+async def get_disclaimer() -> FileResponse:
+    return FileResponse(STATIC_DIR / "disclaimer.html")
+
+
 @app.get("/sw.js", include_in_schema=False)
 async def get_service_worker() -> FileResponse:
     return FileResponse(
@@ -139,6 +210,8 @@ async def health() -> dict[str, Any]:
             "max_duration_seconds": detector.MAX_AUDIO_SECONDS,
             "max_live_frame_kb": MAX_STREAM_FRAME_BYTES // 1024,
             "max_concurrent_inferences": MAX_CONCURRENT_INFERENCES,
+            "uploads_per_5_minutes": UPLOAD_RATE_LIMIT,
+            "streams_per_minute": WEBSOCKET_RATE_LIMIT,
         },
         "supported_extensions": sorted(ALLOWED_EXTENSIONS),
         "stream_protocol": {
@@ -149,6 +222,19 @@ async def health() -> dict[str, Any]:
             "hop_seconds": STREAM_HOP_BYTES // (STREAM_SAMPLE_RATE * 2),
         },
     }
+
+
+@app.get("/api/ready")
+async def readiness() -> JSONResponse:
+    status = detector.status()
+    ready = detector.is_ready
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "warming_up",
+            "model": status,
+        },
+    )
 
 
 @app.post("/api/analyze-file")
@@ -225,6 +311,14 @@ async def send_ws_error(websocket: WebSocket, code: str, message: str) -> None:
 async def websocket_stream(websocket: WebSocket) -> None:
     if not websocket_origin_allowed(websocket):
         await websocket.close(code=1008)
+        return
+
+    key = client_key(
+        websocket.headers,
+        websocket.client.host if websocket.client else None,
+    )
+    if not await rate_limiter.allow(f"stream:{key}", WEBSOCKET_RATE_LIMIT, 60):
+        await websocket.close(code=1008, reason="Too many live sessions. Try again shortly.")
         return
 
     await websocket.accept()

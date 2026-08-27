@@ -5,6 +5,7 @@ colorFrom: blue
 colorTo: purple
 sdk: docker
 app_port: 7860
+suggested_hardware: cpu-basic
 ---
 
 # VoiceGuard AI
@@ -22,6 +23,8 @@ VoiceGuard is a full-stack AI voice-clone screening MVP. It supports:
 - Private, metadata-only scan history stored in the user's browser
 
 The detector is decision support, not proof that a speaker is genuine or fraudulent.
+Live microphone detection is experimental: replay, echo, call codecs, compression,
+and microphone processing can produce false negatives.
 
 ## Run locally
 
@@ -47,6 +50,10 @@ analysis does not need to fetch 1.26 GB of weights.
 
 Open http://127.0.0.1:7860. The same repository can be published as a Hugging Face
 Docker Space; its required Space metadata is included at the top of this README.
+
+The container starts the web interface immediately and warms the pinned model in the
+background. Use `/api/health` for liveness and `/api/ready` for model readiness; the
+readiness endpoint returns HTTP 503 until the model can perform inference.
 
 The first real analysis downloads the pinned
 [Wav2Vec2 deepfake voice detector](https://huggingface.co/garystafford/wav2vec2-deepfake-voice-detector).
@@ -115,6 +122,8 @@ Optional environment variables:
     VOICEGUARD_MODEL_NAME=garystafford/wav2vec2-deepfake-voice-detector
     VOICEGUARD_MODEL_REVISION=c66306024a7ede0be291e9c4558b37634782dc4e
     VOICEGUARD_MAX_CONCURRENT_INFERENCES=1
+    VOICEGUARD_UPLOADS_PER_5_MINUTES=12
+    VOICEGUARD_STREAMS_PER_MINUTE=8
 
 The revision is pinned by default so the reviewed class mapping and model weights do
 not silently change.
@@ -122,9 +131,11 @@ not silently change.
 ## Production checklist
 
 - Serve only through HTTPS and an authenticated reverse proxy.
-- Add per-user upload and WebSocket rate limits.
+- Replace the included single-worker IP rate limiter with a shared Redis-backed
+  limiter if the service is scaled to multiple replicas.
 - Keep the included same-origin WebSocket policy enabled at the reverse proxy.
-- Publish a retention and consent policy.
+- Replace the generic legal pages with the deployment owner's contact and
+  jurisdiction-specific terms before a commercial launch.
 - Run inference in a dedicated worker or GPU service.
 - Evaluate and calibrate the detector on the exact languages and call codecs in use.
 - Keep a human verification path; never block or accuse someone from one score alone.

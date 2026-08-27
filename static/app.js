@@ -10,6 +10,7 @@
     const elements = {
         serviceState: $("service-state"),
         serviceStateText: $("service-state-text"),
+        consentCheckbox: $("consent-checkbox"),
         uploadForm: $("upload-form"),
         audioInput: $("audio-input"),
         dropzone: $("dropzone"),
@@ -128,6 +129,16 @@
     function hideMessage(element) {
         element.hidden = true;
         element.textContent = "";
+    }
+
+    function hasAudioConsent(errorElement) {
+        if (elements.consentCheckbox.checked) return true;
+        showMessage(
+            errorElement,
+            "Confirm that you have permission to analyze this audio before continuing."
+        );
+        elements.consentCheckbox.focus({ preventScroll: false });
+        return false;
     }
 
     function setButtonLoading(button, loading) {
@@ -393,6 +404,7 @@
     async function analyzeSelectedFile(event) {
         event.preventDefault();
         if (!uploadState.file || uploadState.controller) return;
+        if (!hasAudioConsent(elements.fileError)) return;
 
         hideMessage(elements.fileError);
         elements.fileResult.hidden = true;
@@ -471,6 +483,7 @@
     }
 
     async function startRecording() {
+        if (!hasAudioConsent(elements.fileError)) return;
         if (recordState.active || recordState.starting) return;
         hideMessage(elements.fileError);
         if (liveState.running || liveState.starting) {
@@ -804,6 +817,7 @@
     async function startLive() {
         if (liveState.running || liveState.starting) return;
         hideMessage(elements.liveError);
+        if (!hasAudioConsent(elements.liveError)) return;
         if (recordState.active || recordState.starting) {
             showMessage(elements.liveError, "Finish the microphone recording before starting live monitoring.");
             return;
@@ -1040,6 +1054,15 @@
         createWaveform();
         setupUploadEvents();
         setupPwa();
+        try {
+            elements.consentCheckbox.checked = sessionStorage.getItem("voiceguard-consent") === "accepted";
+        } catch {}
+        elements.consentCheckbox.addEventListener("change", () => {
+            try {
+                if (elements.consentCheckbox.checked) sessionStorage.setItem("voiceguard-consent", "accepted");
+                else sessionStorage.removeItem("voiceguard-consent");
+            } catch {}
+        });
         renderHistory();
         elements.clearHistory.addEventListener("click", () => {
             try { localStorage.removeItem(HISTORY_KEY); } catch {}

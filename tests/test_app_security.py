@@ -1,6 +1,11 @@
 import unittest
 
-from app import ALLOWED_EXTENSIONS, websocket_origin_allowed
+from app import (
+    ALLOWED_EXTENSIONS,
+    SlidingWindowRateLimiter,
+    client_key,
+    websocket_origin_allowed,
+)
 
 
 class DummyWebSocket:
@@ -26,6 +31,20 @@ class AppSecurityTests(unittest.TestCase):
 
     def test_browser_recording_format_is_supported(self):
         self.assertIn(".webm", ALLOWED_EXTENSIONS)
+
+    def test_forwarded_client_key_uses_first_address(self):
+        self.assertEqual(
+            client_key({"x-forwarded-for": "203.0.113.4, 10.0.0.2"}, "127.0.0.1"),
+            "203.0.113.4",
+        )
+
+
+class RateLimiterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rejects_requests_over_limit(self):
+        limiter = SlidingWindowRateLimiter()
+        self.assertTrue(await limiter.allow("client", 2, 60))
+        self.assertTrue(await limiter.allow("client", 2, 60))
+        self.assertFalse(await limiter.allow("client", 2, 60))
 
 
 if __name__ == "__main__":
