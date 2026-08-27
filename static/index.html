@@ -10,8 +10,8 @@
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.webmanifest">
-    <link rel="stylesheet" href="/static/styles.css">
-    <script src="/static/app.js" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=1.4.2">
+    <script src="/static/app.js?v=1.4.2" defer></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -32,6 +32,7 @@
             </a>
 
             <div class="header-actions">
+                <button class="button button-quiet" id="dashboard-button" type="button" aria-pressed="false">Dashboard view</button>
                 <div class="service-state" id="service-state" title="Detector service status">
                     <span class="state-dot" aria-hidden="true"></span>
                     <span id="service-state-text">Checking service</span>
@@ -205,6 +206,7 @@
                                 <div><dt>Analyzed audio</dt><dd id="metric-duration">—</dd></div>
                                 <div><dt>Analysis windows</dt><dd id="metric-windows">—</dd></div>
                                 <div><dt>Source format</dt><dd id="metric-format">—</dd></div>
+                                <div><dt>Processing time</dt><dd id="metric-processing">Waiting</dd></div>
                             </dl>
                             <div class="forensic-panel">
                                 <div class="forensic-heading">
@@ -220,6 +222,15 @@
                             <div class="result-actions">
                                 <button class="button button-secondary" id="download-report" type="button">Download evidence report</button>
                                 <button class="button button-quiet" id="copy-summary" type="button">Copy summary</button>
+                            </div>
+                            <div class="feedback-panel" id="feedback-panel">
+                                <span>Was this screening result useful?</span>
+                                <div>
+                                    <button type="button" data-feedback="correct">Correct</button>
+                                    <button type="button" data-feedback="incorrect">Incorrect</button>
+                                    <button type="button" data-feedback="unsure">Unsure</button>
+                                </div>
+                                <small id="feedback-status">Feedback stays on this device and never includes audio.</small>
                             </div>
                             <p class="result-note">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 11v5m0-8v.1"/></svg>
@@ -294,6 +305,22 @@
                     </div>
                     <p id="history-empty">Completed scans will appear here. Only result metadata is stored in this browser; audio is never stored.</p>
                     <div class="history-list" id="history-list"></div>
+                </section>
+
+                <section class="system-dashboard" id="system-dashboard" aria-labelledby="system-dashboard-title">
+                    <div class="history-heading">
+                        <div><span class="section-kicker">Live system status</span><h3 id="system-dashboard-title">System dashboard</h3></div>
+                        <span class="dashboard-live"><i></i> Runtime telemetry</span>
+                    </div>
+                    <div class="dashboard-grid">
+                        <article><span>API service</span><strong id="dashboard-api">Checking</strong><small>HTTPS health endpoint</small></article>
+                        <article><span>AI model</span><strong id="dashboard-model">Checking</strong><small id="dashboard-model-name">Pinned Wav2Vec2</small></article>
+                        <article><span>Compute</span><strong id="dashboard-device">—</strong><small>Single bounded worker</small></article>
+                        <article><span>Live transport</span><strong id="dashboard-transport">—</strong><small>Rolling 16 kHz PCM</small></article>
+                        <article><span>Version</span><strong id="dashboard-version">—</strong><small>Reproducible model revision</small></article>
+                        <article><span>Privacy</span><strong>Audio not archived</strong><small>Metadata history stays local</small></article>
+                    </div>
+                    <p class="dashboard-note">The dashboard reports actual backend state. It is not a prerecorded animation.</p>
                 </section>
             </div>
         </section>

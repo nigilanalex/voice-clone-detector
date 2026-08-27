@@ -21,6 +21,8 @@ VoiceGuard is a full-stack AI voice-clone screening MVP. It supports:
 - Per-window forensic timeline and consistency assessment
 - SHA-256 evidence fingerprint and downloadable JSON report
 - Private, metadata-only scan history stored in the user's browser
+- System dashboard with real backend, model, device, transport, and version state
+- Measured server processing time and local result-quality feedback
 
 The detector is decision support, not proof that a speaker is genuine or fraudulent.
 Live microphone detection is experimental: replay, echo, call codecs, compression,

@@ -83,7 +83,7 @@ class SlidingWindowRateLimiter:
 app = FastAPI(
     title="VoiceGuard AI",
     description="Probabilistic AI-generated voice screening for recordings and live microphone audio.",
-    version="1.3.0",
+    version="1.4.2",
 )
 detector = VoiceCloneDetector()
 inference_slots = asyncio.Semaphore(MAX_CONCURRENT_INFERENCES)
@@ -204,6 +204,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "service": "VoiceGuard AI",
+        "version": app.version,
         "model": detector.status(),
         "limits": {
             "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
@@ -271,9 +272,11 @@ async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
         )
 
     try:
+        inference_started = time.perf_counter()
         result = await run_inference(
             detector.process_file_bytes, bytes(contents), filename
         )
+        processing_ms = round((time.perf_counter() - inference_started) * 1000)
     except (AudioDecodeError, AudioValidationError) as exc:
         raise HTTPException(
             status_code=422,
@@ -296,6 +299,7 @@ async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
                 "model": detector.model_name,
                 "model_revision": detector.model_revision,
                 "service_version": app.version,
+                "processing_ms": processing_ms,
             },
         }
     )
@@ -421,8 +425,12 @@ async def websocket_stream(websocket: WebSocket) -> None:
                     )
 
                 try:
+                    inference_started = time.perf_counter()
                     result = await run_inference(
                         detector.process_raw_pcm, chunk, STREAM_SAMPLE_RATE
+                    )
+                    result["processing_ms"] = round(
+                        (time.perf_counter() - inference_started) * 1000
                     )
                 except AudioValidationError as exc:
                     await send_ws_error(websocket, "invalid_audio", str(exc))

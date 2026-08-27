@@ -10,6 +10,14 @@
     const elements = {
         serviceState: $("service-state"),
         serviceStateText: $("service-state-text"),
+        dashboardButton: $("dashboard-button"),
+        systemDashboard: $("system-dashboard"),
+        dashboardApi: $("dashboard-api"),
+        dashboardModel: $("dashboard-model"),
+        dashboardModelName: $("dashboard-model-name"),
+        dashboardDevice: $("dashboard-device"),
+        dashboardTransport: $("dashboard-transport"),
+        dashboardVersion: $("dashboard-version"),
         consentCheckbox: $("consent-checkbox"),
         uploadForm: $("upload-form"),
         audioInput: $("audio-input"),
@@ -41,6 +49,7 @@
         metricDuration: $("metric-duration"),
         metricWindows: $("metric-windows"),
         metricFormat: $("metric-format"),
+        metricProcessing: $("metric-processing"),
         reliabilityChip: $("reliability-chip"),
         windowTimeline: $("window-timeline"),
         fileFingerprint: $("file-fingerprint"),
@@ -49,6 +58,8 @@
         historyList: $("history-list"),
         historyEmpty: $("history-empty"),
         clearHistory: $("clear-history"),
+        feedbackPanel: $("feedback-panel"),
+        feedbackStatus: $("feedback-status"),
         liveButton: $("live-button"),
         liveChip: $("live-chip"),
         liveStateText: $("live-state-text"),
@@ -102,6 +113,7 @@
 
     let deferredInstallPrompt = null;
     const HISTORY_KEY = "voiceguard-scan-history-v1";
+    const FEEDBACK_KEY = "voiceguard-result-feedback-v1";
 
     function formatBytes(bytes) {
         if (!Number.isFinite(bytes)) return "Unknown size";
@@ -184,6 +196,12 @@
             if (!response.ok) throw new Error("Health check failed");
             const payload = await response.json();
             uploadState.modelReady = Boolean(payload?.model?.ready);
+            elements.dashboardApi.textContent = "Online";
+            elements.dashboardModel.textContent = uploadState.modelReady ? "Ready" : "Warming up";
+            elements.dashboardModelName.textContent = String(payload?.model?.model || "Pinned Wav2Vec2").split("/").pop();
+            elements.dashboardDevice.textContent = String(payload?.model?.device || "CPU").toUpperCase();
+            elements.dashboardTransport.textContent = window.isSecureContext ? "HTTPS + WSS" : "Local HTTP + WS";
+            elements.dashboardVersion.textContent = payload?.version || "1.4.2";
             elements.serviceState.classList.add("online");
             elements.serviceState.classList.remove("offline");
             elements.serviceStateText.textContent = uploadState.modelReady
@@ -193,6 +211,10 @@
                 ? "Detector model is loaded"
                 : "The detector model will load during the first analysis";
         } catch {
+            elements.dashboardApi.textContent = "Offline";
+            elements.dashboardModel.textContent = "Unavailable";
+            elements.dashboardDevice.textContent = "—";
+            elements.dashboardTransport.textContent = "Disconnected";
             elements.serviceState.classList.add("offline");
             elements.serviceState.classList.remove("online");
             elements.serviceStateText.textContent = "Service offline";
@@ -381,6 +403,9 @@
             : "—";
         elements.metricWindows.textContent = String(analysis.analysis_windows ?? "—");
         elements.metricFormat.textContent = getExtension(filename || "").toUpperCase() || "Unknown";
+        elements.metricProcessing.textContent = Number.isFinite(metadata.processing_ms)
+            ? `${(metadata.processing_ms / 1000).toFixed(2)} seconds`
+            : "Not available";
         const reliability = reliabilityFor(analysis);
         elements.reliabilityChip.className = `reliability-chip ${reliability.className}`;
         elements.reliabilityChip.textContent = reliability.label;
@@ -397,6 +422,10 @@
             analysis,
         };
         saveHistory(uploadState.lastReport);
+        elements.feedbackStatus.textContent = "Feedback stays on this device and never includes audio.";
+        elements.feedbackPanel.querySelectorAll("button").forEach((button) => {
+            button.classList.remove("selected");
+        });
         elements.fileResult.hidden = false;
         elements.fileResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
@@ -1050,10 +1079,46 @@
         updatePlatformTip();
     }
 
+    function setupShowcase() {
+        elements.dashboardButton.addEventListener("click", () => {
+            const enabled = !document.body.classList.contains("dashboard-mode");
+            document.body.classList.toggle("dashboard-mode", enabled);
+            elements.dashboardButton.setAttribute("aria-pressed", String(enabled));
+            elements.dashboardButton.textContent = enabled ? "Exit dashboard view" : "Dashboard view";
+            if (enabled) {
+                elements.systemDashboard.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
+
+        elements.feedbackPanel.querySelectorAll("button[data-feedback]").forEach((button) => {
+            button.addEventListener("click", () => {
+                if (!uploadState.lastReport) return;
+                const feedback = {
+                    fingerprint: uploadState.lastReport.metadata.sha256?.slice(0, 16) || "unavailable",
+                    result: uploadState.lastReport.analysis.status,
+                    score: uploadState.lastReport.analysis.risk_score,
+                    response: button.dataset.feedback,
+                    recorded_at: new Date().toISOString(),
+                };
+                try {
+                    const existing = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || "[]");
+                    const values = Array.isArray(existing) ? existing : [];
+                    values.unshift(feedback);
+                    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(values.slice(0, 50)));
+                } catch {}
+                elements.feedbackPanel.querySelectorAll("button").forEach((item) => {
+                    item.classList.toggle("selected", item === button);
+                });
+                elements.feedbackStatus.textContent = "Feedback saved locally for your evaluation summary.";
+            });
+        });
+    }
+
     function init() {
         createWaveform();
         setupUploadEvents();
         setupPwa();
+        setupShowcase();
         try {
             elements.consentCheckbox.checked = sessionStorage.getItem("voiceguard-consent") === "accepted";
         } catch {}
@@ -1085,6 +1150,7 @@
             elements.serviceStateText.textContent = "Offline";
         });
         checkService();
+        window.setInterval(checkService, 15000);
     }
 
     init();
