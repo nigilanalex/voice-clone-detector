@@ -1,4 +1,4 @@
-const CACHE_NAME = "voiceguard-shell-v3";
+const CACHE_NAME = "voiceguard-shell-v5";
 const APP_SHELL = [
     "/",
     "/static/styles.css",

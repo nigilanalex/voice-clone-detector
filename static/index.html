@@ -116,14 +116,14 @@
                                 <h3>Check an audio file</h3>
                             </div>
                         </div>
-                        <p class="card-intro">Upload a voice note, recording, or exported call audio for a full scan.</p>
+                        <p class="card-intro">Upload a voice note, or record a fresh sample directly on this device.</p>
 
                         <form id="upload-form" novalidate>
                             <input
                                 id="audio-input"
                                 class="visually-hidden"
                                 type="file"
-                                accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/flac,audio/ogg"
+                                accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm,audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/flac,audio/ogg,audio/webm"
                             >
                             <label class="dropzone" id="dropzone" for="audio-input">
                                 <span class="upload-illustration" aria-hidden="true">
@@ -131,8 +131,27 @@
                                 </span>
                                 <strong>Drop your recording here</strong>
                                 <span>or <u>browse your device</u></span>
-                                <small>WAV, MP3, M4A, AAC, FLAC, OGG or OPUS · max 25 MB</small>
+                                <small>WAV, MP3, M4A, WebM, AAC, FLAC, OGG or OPUS · max 25 MB</small>
                             </label>
+
+                            <div class="capture-options" id="capture-options">
+                                <div class="capture-divider"><span>or</span></div>
+                                <button class="button button-record" id="record-button" type="button">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg>
+                                    <span id="record-button-text">Record a new sample</span>
+                                </button>
+                            </div>
+
+                            <div class="recording-panel" id="recording-panel" aria-live="polite" hidden>
+                                <div class="recording-status">
+                                    <span class="recording-pulse" aria-hidden="true"></span>
+                                    <div><strong>Recording microphone</strong><small>Speak clearly for at least five seconds</small></div>
+                                    <time id="recording-timer" datetime="PT0S">00:00</time>
+                                </div>
+                                <button class="button button-stop-recording" id="stop-recording-button" type="button">
+                                    <span aria-hidden="true"></span> Stop and use recording
+                                </button>
+                            </div>
 
                             <div class="selected-file" id="selected-file" hidden>
                                 <span class="file-type" id="file-type">WAV</span>
@@ -143,7 +162,7 @@
                                 <button class="icon-button" id="remove-file" type="button" aria-label="Remove selected recording">
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
                                 </button>
-                                <audio id="audio-preview" preload="metadata"></audio>
+                                <audio id="audio-preview" preload="metadata" controls></audio>
                             </div>
 
                             <div class="inline-message error-message" id="file-error" role="alert" tabindex="-1" hidden></div>
@@ -172,11 +191,28 @@
                                 </div>
                             </div>
                             <dl class="metrics" id="file-metrics">
-                                <div><dt>Model confidence</dt><dd id="metric-confidence">—</dd></div>
+                                <div><dt>Decision strength</dt><dd id="metric-confidence">—</dd></div>
+                                <div><dt>Window variation</dt><dd id="metric-spread">—</dd></div>
                                 <div><dt>Audio quality</dt><dd id="metric-quality">—</dd></div>
                                 <div><dt>Analyzed audio</dt><dd id="metric-duration">—</dd></div>
                                 <div><dt>Analysis windows</dt><dd id="metric-windows">—</dd></div>
+                                <div><dt>Source format</dt><dd id="metric-format">—</dd></div>
                             </dl>
+                            <div class="forensic-panel">
+                                <div class="forensic-heading">
+                                    <div><span>FORENSIC TIMELINE</span><strong>AI risk by sampled window</strong></div>
+                                    <span class="reliability-chip" id="reliability-chip">Awaiting result</span>
+                                </div>
+                                <div class="window-timeline" id="window-timeline" role="img" aria-label="AI risk across analyzed audio windows"></div>
+                                <div class="fingerprint-row">
+                                    <span>File fingerprint</span>
+                                    <code id="file-fingerprint">Unavailable</code>
+                                </div>
+                            </div>
+                            <div class="result-actions">
+                                <button class="button button-secondary" id="download-report" type="button">Download evidence report</button>
+                                <button class="button button-quiet" id="copy-summary" type="button">Copy summary</button>
+                            </div>
                             <p class="result-note">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 11v5m0-8v.1"/></svg>
                                 This is a screening result, not proof of identity. Verify suspicious callers independently.
@@ -196,6 +232,10 @@
                             <span class="live-chip" id="live-chip"><i></i><span>Standby</span></span>
                         </div>
                         <p class="card-intro">Listen to nearby speech in rolling five-second windows and see the risk update.</p>
+                        <div class="replay-warning">
+                            <strong>Experimental replay mode</strong>
+                            <span>Speaker, room, call compression, and microphone processing can hide AI artifacts. A low live score does not prove a human voice.</span>
+                        </div>
 
                         <div class="live-display">
                             <div class="live-display-head">
@@ -238,6 +278,15 @@
                         </p>
                     </article>
                 </div>
+
+                <section class="history-panel" aria-labelledby="history-title">
+                    <div class="history-heading">
+                        <div><span class="section-kicker">Private on this device</span><h3 id="history-title">Recent scan history</h3></div>
+                        <button class="button button-quiet" id="clear-history" type="button">Clear history</button>
+                    </div>
+                    <p id="history-empty">Completed scans will appear here. Only result metadata is stored in this browser; audio is never stored.</p>
+                    <div class="history-list" id="history-list"></div>
+                </section>
             </div>
         </section>
 
@@ -267,7 +316,7 @@
                         <span class="phone-brand">VoiceGuard</span>
                         <div class="phone-rings"><i></i><i></i><i></i><b><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11a6 6 0 0 0 12 0"/></svg></b></div>
                         <small>LISTENING</small>
-                        <strong>Live protection</strong>
+                        <strong>Replay screening</strong>
                         <div class="phone-wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
                     </div>
                 </div>

@@ -2,7 +2,7 @@
     "use strict";
 
     const MAX_FILE_BYTES = 25 * 1024 * 1024;
-    const ALLOWED_EXTENSIONS = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus"]);
+    const ALLOWED_EXTENSIONS = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "webm"]);
     const TARGET_SAMPLE_RATE = 16000;
     const WS_BACKPRESSURE_LIMIT = 256 * 1024;
 
@@ -19,6 +19,12 @@
         fileMeta: $("file-meta"),
         removeFile: $("remove-file"),
         audioPreview: $("audio-preview"),
+        captureOptions: $("capture-options"),
+        recordButton: $("record-button"),
+        recordButtonText: $("record-button-text"),
+        recordingPanel: $("recording-panel"),
+        recordingTimer: $("recording-timer"),
+        stopRecordingButton: $("stop-recording-button"),
         analyzeButton: $("analyze-button"),
         uploadLoadingText: $("upload-loading-text"),
         fileError: $("file-error"),
@@ -29,9 +35,19 @@
         fileResultTitle: $("file-result-title"),
         fileSummary: $("file-summary"),
         metricConfidence: $("metric-confidence"),
+        metricSpread: $("metric-spread"),
         metricQuality: $("metric-quality"),
         metricDuration: $("metric-duration"),
         metricWindows: $("metric-windows"),
+        metricFormat: $("metric-format"),
+        reliabilityChip: $("reliability-chip"),
+        windowTimeline: $("window-timeline"),
+        fileFingerprint: $("file-fingerprint"),
+        downloadReport: $("download-report"),
+        copySummary: $("copy-summary"),
+        historyList: $("history-list"),
+        historyEmpty: $("history-empty"),
+        clearHistory: $("clear-history"),
         liveButton: $("live-button"),
         liveChip: $("live-chip"),
         liveStateText: $("live-state-text"),
@@ -52,6 +68,7 @@
         previewUrl: null,
         controller: null,
         modelReady: false,
+        lastReport: null,
     };
 
     const liveState = {
@@ -70,7 +87,20 @@
         resampleState: { buffer: new Float32Array(0), position: 0 },
     };
 
+    const recordState = {
+        active: false,
+        starting: false,
+        recorder: null,
+        stream: null,
+        chunks: [],
+        timerId: null,
+        startedAt: 0,
+        mimeType: "",
+        extension: "webm",
+    };
+
     let deferredInstallPrompt = null;
+    const HISTORY_KEY = "voiceguard-scan-history-v1";
 
     function formatBytes(bytes) {
         if (!Number.isFinite(bytes)) return "Unknown size";
@@ -173,6 +203,7 @@
         elements.audioPreview.removeAttribute("src");
         elements.selectedFile.hidden = true;
         elements.dropzone.hidden = false;
+        elements.captureOptions.hidden = false;
         elements.analyzeButton.disabled = true;
         elements.fileResult.hidden = true;
         hideMessage(elements.fileError);
@@ -187,7 +218,7 @@
         if (!file || !ALLOWED_EXTENSIONS.has(extension)) {
             showMessage(
                 elements.fileError,
-                "Choose a WAV, MP3, M4A, AAC, FLAC, OGG, or OPUS recording."
+                "Choose a WAV, MP3, M4A, WebM, AAC, FLAC, OGG, or OPUS recording."
             );
             return;
         }
@@ -208,6 +239,7 @@
         elements.fileName.textContent = file.name;
         elements.fileMeta.textContent = `${formatBytes(file.size)} · Reading duration…`;
         elements.dropzone.hidden = true;
+        elements.captureOptions.hidden = true;
         elements.selectedFile.hidden = false;
         elements.analyzeButton.disabled = false;
 
@@ -221,7 +253,94 @@
         };
     }
 
-    function renderFileResult(analysis, filename) {
+    function reliabilityFor(analysis) {
+        if (!Number.isFinite(analysis.risk_score)) return { label: "No verdict", className: "neutral" };
+        if (analysis.audio_quality?.quality !== "good") return { label: "Limited audio", className: "uncertain" };
+        if (Number(analysis.score_spread) >= 35) return { label: "Mixed evidence", className: "uncertain" };
+        return { label: "Consistent windows", className: "strong" };
+    }
+
+    function renderTimeline(scores) {
+        elements.windowTimeline.replaceChildren();
+        if (!Array.isArray(scores) || scores.length === 0) {
+            const empty = document.createElement("span");
+            empty.className = "timeline-empty";
+            empty.textContent = "No speech windows were scored.";
+            elements.windowTimeline.append(empty);
+            return;
+        }
+        scores.forEach((rawScore, index) => {
+            const score = Math.max(0, Math.min(100, Number(rawScore) || 0));
+            const item = document.createElement("div");
+            item.className = "timeline-item";
+            const track = document.createElement("span");
+            track.className = "timeline-track";
+            const fill = document.createElement("i");
+            fill.style.width = `${score}%`;
+            track.append(fill);
+            const label = document.createElement("small");
+            label.textContent = `Window ${index + 1}`;
+            const value = document.createElement("strong");
+            value.textContent = `${Math.round(score)}%`;
+            item.append(track, label, value);
+            elements.windowTimeline.append(item);
+        });
+    }
+
+    function readHistory() {
+        try {
+            const value = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+            return Array.isArray(value) ? value : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function renderHistory() {
+        const history = readHistory();
+        elements.historyList.replaceChildren();
+        elements.historyEmpty.hidden = history.length > 0;
+        history.forEach((item) => {
+            const row = document.createElement("article");
+            row.className = "history-item";
+            const identity = document.createElement("div");
+            const name = document.createElement("strong");
+            name.textContent = item.filename;
+            const detail = document.createElement("span");
+            detail.textContent = `${new Date(item.analyzedAt).toLocaleString()} · ${item.fingerprint}`;
+            identity.append(name, detail);
+            const result = document.createElement("div");
+            const verdict = document.createElement("span");
+            const tone = resultTone(item.status, item.score);
+            verdict.className = `history-verdict ${tone.className}`;
+            verdict.textContent = item.status;
+            const score = document.createElement("strong");
+            score.style.color = tone.color;
+            score.textContent = Number.isFinite(item.score) ? `${Math.round(item.score)}%` : "—";
+            result.append(verdict, score);
+            row.append(identity, result);
+            elements.historyList.append(row);
+        });
+    }
+
+    function saveHistory(report) {
+        const history = readHistory();
+        history.unshift({
+            filename: report.filename,
+            status: report.analysis.status,
+            score: report.analysis.risk_score,
+            analyzedAt: report.metadata.analyzed_at || new Date().toISOString(),
+            fingerprint: report.metadata.sha256?.slice(0, 12) || "no fingerprint",
+        });
+        try {
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 6)));
+        } catch {
+            return;
+        }
+        renderHistory();
+    }
+
+    function renderFileResult(analysis, filename, metadata = {}) {
         const score = Number.isFinite(analysis.risk_score) ? analysis.risk_score : null;
         const tone = resultTone(analysis.status, score);
         elements.fileScore.textContent = score === null ? "—" : `${Math.round(score)}%`;
@@ -240,6 +359,9 @@
         elements.metricConfidence.textContent = Number.isFinite(analysis.confidence_score)
             ? `${analysis.confidence_score}%`
             : "Not available";
+        elements.metricSpread.textContent = Number.isFinite(analysis.score_spread)
+            ? `${analysis.score_spread}%`
+            : "Not available";
         elements.metricQuality.textContent = String(
             analysis.audio_quality?.quality || "unknown"
         ).replaceAll("_", " ");
@@ -247,6 +369,23 @@
             ? formatDuration(analysis.audio_quality.duration_seconds)
             : "—";
         elements.metricWindows.textContent = String(analysis.analysis_windows ?? "—");
+        elements.metricFormat.textContent = getExtension(filename || "").toUpperCase() || "Unknown";
+        const reliability = reliabilityFor(analysis);
+        elements.reliabilityChip.className = `reliability-chip ${reliability.className}`;
+        elements.reliabilityChip.textContent = reliability.label;
+        elements.fileFingerprint.textContent = metadata.sha256
+            ? `${metadata.sha256.slice(0, 16)}…`
+            : "Unavailable";
+        renderTimeline(analysis.window_scores);
+        uploadState.lastReport = {
+            report_type: "VoiceGuard screening evidence",
+            filename,
+            metadata,
+            reliability: reliability.label,
+            capture_warning: "Replay, room acoustics, codecs, and unseen voice generators can change detection accuracy.",
+            analysis,
+        };
+        saveHistory(uploadState.lastReport);
         elements.fileResult.hidden = false;
         elements.fileResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
@@ -276,7 +415,7 @@
             if (!response.ok) throw new Error(await parseError(response));
             const payload = await response.json();
             uploadState.modelReady = true;
-            renderFileResult(payload.analysis, payload.filename);
+            renderFileResult(payload.analysis, payload.filename, payload.analysis_metadata || {});
             elements.serviceStateText.textContent = "Detector ready";
             elements.serviceState.title = "Detector model is loaded";
         } catch (error) {
@@ -291,6 +430,150 @@
             setButtonLoading(elements.analyzeButton, false);
             elements.analyzeButton.disabled = !uploadState.file;
         }
+    }
+
+    function preferredRecorderFormat() {
+        const formats = [
+            { mimeType: "audio/webm;codecs=opus", extension: "webm" },
+            { mimeType: "audio/webm", extension: "webm" },
+            { mimeType: "audio/mp4", extension: "m4a" },
+            { mimeType: "audio/ogg;codecs=opus", extension: "ogg" },
+        ];
+        return formats.find((format) => MediaRecorder.isTypeSupported(format.mimeType))
+            || { mimeType: "", extension: "webm" };
+    }
+
+    function updateRecordingTimer() {
+        const elapsed = Math.max(0, Math.floor((Date.now() - recordState.startedAt) / 1000));
+        elements.recordingTimer.textContent = formatDuration(elapsed);
+        elements.recordingTimer.dateTime = `PT${elapsed}S`;
+        if (elapsed >= 60) stopRecording();
+    }
+
+    function releaseRecordingResources() {
+        if (recordState.timerId) {
+            window.clearInterval(recordState.timerId);
+            recordState.timerId = null;
+        }
+        if (recordState.stream) {
+            recordState.stream.getTracks().forEach((track) => track.stop());
+            recordState.stream = null;
+        }
+        recordState.active = false;
+        recordState.starting = false;
+        recordState.recorder = null;
+        elements.recordButton.disabled = !window.MediaRecorder;
+        elements.recordingPanel.hidden = true;
+        elements.captureOptions.hidden = Boolean(uploadState.file);
+        elements.dropzone.hidden = Boolean(uploadState.file);
+        elements.recordingTimer.textContent = "00:00";
+        elements.recordingTimer.dateTime = "PT0S";
+    }
+
+    async function startRecording() {
+        if (recordState.active || recordState.starting) return;
+        hideMessage(elements.fileError);
+        if (liveState.running || liveState.starting) {
+            showMessage(elements.fileError, "Stop live monitoring before recording a new sample.");
+            return;
+        }
+        if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+            showMessage(
+                elements.fileError,
+                "Microphone recording requires HTTPS or localhost in a supported browser."
+            );
+            return;
+        }
+        if (!window.MediaRecorder) {
+            showMessage(elements.fileError, "This browser does not support microphone recording.");
+            return;
+        }
+
+        recordState.starting = true;
+        elements.recordButton.disabled = true;
+        try {
+            recordState.stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: { ideal: 1 },
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                },
+                video: false,
+            });
+            const format = preferredRecorderFormat();
+            const options = format.mimeType ? { mimeType: format.mimeType } : undefined;
+            const recorder = new MediaRecorder(recordState.stream, options);
+            recordState.recorder = recorder;
+            recordState.mimeType = recorder.mimeType || format.mimeType || "audio/webm";
+            recordState.extension = format.extension;
+            recordState.chunks = [];
+
+            recorder.ondataavailable = (event) => {
+                if (event.data?.size) recordState.chunks.push(event.data);
+            };
+            recorder.onerror = () => {
+                recorder.onstop = null;
+                showMessage(elements.fileError, "The browser could not finish this recording.");
+                releaseRecordingResources();
+            };
+            recorder.onstop = () => {
+                const chunks = recordState.chunks;
+                const mimeType = recordState.mimeType;
+                const extension = recordState.extension;
+                releaseRecordingResources();
+                const blob = new Blob(chunks, { type: mimeType });
+                if (!blob.size) {
+                    showMessage(elements.fileError, "No microphone audio was recorded. Please try again.");
+                    return;
+                }
+                const file = new File(
+                    [blob],
+                    `voiceguard-recording-${Date.now()}.${extension}`,
+                    { type: mimeType, lastModified: Date.now() }
+                );
+                selectFile(file);
+            };
+
+            recordState.active = true;
+            recordState.starting = false;
+            recordState.startedAt = Date.now();
+            elements.captureOptions.hidden = true;
+            elements.dropzone.hidden = true;
+            elements.recordingPanel.hidden = false;
+            recorder.start(500);
+            recordState.timerId = window.setInterval(updateRecordingTimer, 1000);
+            updateRecordingTimer();
+        } catch (error) {
+            releaseRecordingResources();
+            const denied = error?.name === "NotAllowedError";
+            showMessage(
+                elements.fileError,
+                denied
+                    ? "Microphone permission was denied. Allow it in browser settings and try again."
+                    : (error.message || "Microphone recording could not start.")
+            );
+        }
+    }
+
+    function stopRecording() {
+        if (recordState.recorder?.state === "recording") {
+            elements.stopRecordingButton.disabled = true;
+            recordState.recorder.addEventListener(
+                "stop",
+                () => { elements.stopRecordingButton.disabled = false; },
+                { once: true }
+            );
+            recordState.recorder.stop();
+        }
+    }
+
+    function discardRecording() {
+        if (recordState.recorder) {
+            recordState.recorder.onstop = null;
+            if (recordState.recorder.state !== "inactive") recordState.recorder.stop();
+        }
+        releaseRecordingResources();
     }
 
     function createWaveform() {
@@ -521,6 +804,10 @@
     async function startLive() {
         if (liveState.running || liveState.starting) return;
         hideMessage(elements.liveError);
+        if (recordState.active || recordState.starting) {
+            showMessage(elements.liveError, "Finish the microphone recording before starting live monitoring.");
+            return;
+        }
         liveState.recentScores = [];
         liveState.resampleState = { buffer: new Float32Array(0), position: 0 };
         setLiveConnecting(true);
@@ -652,7 +939,36 @@
             if (file) selectFile(file);
         });
         elements.removeFile.addEventListener("click", clearSelectedFile);
+        elements.recordButton.addEventListener("click", startRecording);
+        elements.stopRecordingButton.addEventListener("click", stopRecording);
         elements.uploadForm.addEventListener("submit", analyzeSelectedFile);
+        elements.downloadReport.addEventListener("click", () => {
+            if (!uploadState.lastReport) return;
+            const reportBlob = new Blob(
+                [JSON.stringify(uploadState.lastReport, null, 2)],
+                { type: "application/json" }
+            );
+            const reportUrl = URL.createObjectURL(reportBlob);
+            const link = document.createElement("a");
+            link.href = reportUrl;
+            link.download = `voiceguard-report-${Date.now()}.json`;
+            link.click();
+            URL.revokeObjectURL(reportUrl);
+        });
+        elements.copySummary.addEventListener("click", async () => {
+            if (!uploadState.lastReport) return;
+            const report = uploadState.lastReport;
+            const score = report.analysis.risk_score ?? "no";
+            const fingerprint = report.metadata.sha256 || "unavailable";
+            const summary = `VoiceGuard: ${report.analysis.status} (${score}% AI risk). Reliability: ${report.reliability}. File fingerprint: ${fingerprint}. Screening only, not proof.`;
+            try {
+                await navigator.clipboard.writeText(summary);
+                elements.copySummary.textContent = "Copied";
+                window.setTimeout(() => { elements.copySummary.textContent = "Copy summary"; }, 1600);
+            } catch {
+                showMessage(elements.fileError, "Your browser blocked clipboard access.");
+            }
+        });
 
         for (const eventName of ["dragenter", "dragover"]) {
             elements.dropzone.addEventListener(eventName, (event) => {
@@ -724,9 +1040,19 @@
         createWaveform();
         setupUploadEvents();
         setupPwa();
+        renderHistory();
+        elements.clearHistory.addEventListener("click", () => {
+            try { localStorage.removeItem(HISTORY_KEY); } catch {}
+            renderHistory();
+        });
         elements.liveButton.addEventListener("click", toggleLive);
+        if (!window.MediaRecorder) {
+            elements.recordButton.disabled = true;
+            elements.recordButtonText.textContent = "Recording not supported in this browser";
+        }
         window.addEventListener("pagehide", () => {
             if (liveState.running || liveState.starting) stopLive();
+            if (recordState.active || recordState.starting) discardRecording();
             if (uploadState.previewUrl) URL.revokeObjectURL(uploadState.previewUrl);
         });
         window.addEventListener("online", checkService);

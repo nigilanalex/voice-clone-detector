@@ -6,10 +6,15 @@
     "start_url": "/",
     "scope": "/",
     "display": "standalone",
+    "display_override": ["standalone", "minimal-ui"],
     "orientation": "any",
+    "lang": "en",
+    "dir": "ltr",
     "background_color": "#07111f",
     "theme_color": "#07111f",
     "categories": ["security", "utilities"],
+    "prefer_related_applications": false,
+    "launch_handler": { "client_mode": "navigate-existing" },
     "icons": [
         {
             "src": "/static/icon.svg",

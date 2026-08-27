@@ -52,6 +52,26 @@ class VoiceCloneDetectorTests(unittest.TestCase):
         self.assertEqual(self.detector._classification(0.40)[0], "UNCERTAIN")
         self.assertEqual(self.detector._classification(0.70)[0], "LIKELY SYNTHETIC")
 
+    def test_uses_median_score_and_reports_decision_strength(self):
+        self.detector._audio_quality = lambda audio, sr: {
+            "quality": "good",
+            "message": "ok",
+            "duration_seconds": 6.0,
+        }
+        self.detector._extract_dsp_features = lambda audio, sr: {}
+        self.detector._select_windows = lambda audio, sr: [audio, audio, audio]
+        self.detector._infer_probabilities = lambda windows, sr: [0.1, 0.8, 0.9]
+
+        audio = np.full(
+            VoiceCloneDetector.TARGET_SAMPLE_RATE * 6, 0.1, dtype=np.float32
+        )
+        result = self.detector.predict(audio)
+
+        self.assertEqual(result["risk_score"], 80.0)
+        self.assertEqual(result["decision_strength"], 60.0)
+        self.assertEqual(result["score_spread"], 80.0)
+        self.assertEqual(result["status"], "LIKELY SYNTHETIC")
+
     def test_long_recording_uses_bounded_windows(self):
         seconds = 90
         audio = np.ones(

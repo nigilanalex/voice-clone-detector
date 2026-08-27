@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,24 +35,83 @@ from model_engine import (
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
+ALLOWED_EXTENSIONS = {
+    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".webm"
+}
 STREAM_SAMPLE_RATE = 16_000
 STREAM_WINDOW_BYTES = 5 * STREAM_SAMPLE_RATE * 2
 STREAM_HOP_BYTES = 2 * STREAM_SAMPLE_RATE * 2
 MAX_STREAM_BUFFER_BYTES = 15 * STREAM_SAMPLE_RATE * 2
+MAX_STREAM_FRAME_BYTES = 64 * 1024
+MAX_STREAM_SETUP_BYTES = 2 * 1024
+
+
+def positive_env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+MAX_CONCURRENT_INFERENCES = positive_env_int(
+    "VOICEGUARD_MAX_CONCURRENT_INFERENCES", 1
+)
 
 app = FastAPI(
     title="VoiceGuard AI",
     description="Probabilistic AI-generated voice screening for recordings and live microphone audio.",
-    version="1.0.0",
+    version="1.2.0",
 )
 detector = VoiceCloneDetector()
+inference_slots = asyncio.Semaphore(MAX_CONCURRENT_INFERENCES)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Apply a conservative browser policy to every HTTP response."""
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "media-src 'self' blob:; connect-src 'self' ws: wss:; "
+        "worker-src 'self'; object-src 'none'; base-uri 'self'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
+    response.headers["X-Request-ID"] = request.headers.get("X-Request-ID", str(uuid4()))
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+    if forwarded_proto == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 def error_payload(code: str, message: str) -> dict[str, Any]:
     return {"error": {"code": code, "message": message}}
+
+
+async def run_inference(function, *args):
+    """Bound heavyweight model work so requests cannot create an unbounded queue."""
+
+    async with inference_slots:
+        return await asyncio.to_thread(function, *args)
+
+
+def websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """Reject browser WebSockets opened by an unrelated website."""
+
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    origin_host = urlparse(origin).netloc.lower()
+    request_host = websocket.headers.get("host") or ""
+    request_host = request_host.split(",", 1)[0].strip().lower()
+    return bool(origin_host and request_host and origin_host == request_host)
 
 
 @app.get("/", include_in_schema=False)
@@ -65,6 +137,16 @@ async def health() -> dict[str, Any]:
         "limits": {
             "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
             "max_duration_seconds": detector.MAX_AUDIO_SECONDS,
+            "max_live_frame_kb": MAX_STREAM_FRAME_BYTES // 1024,
+            "max_concurrent_inferences": MAX_CONCURRENT_INFERENCES,
+        },
+        "supported_extensions": sorted(ALLOWED_EXTENSIONS),
+        "stream_protocol": {
+            "format": "pcm_s16le",
+            "sample_rate": STREAM_SAMPLE_RATE,
+            "channels": 1,
+            "window_seconds": STREAM_WINDOW_BYTES // (STREAM_SAMPLE_RATE * 2),
+            "hop_seconds": STREAM_HOP_BYTES // (STREAM_SAMPLE_RATE * 2),
         },
     }
 
@@ -78,7 +160,7 @@ async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
             status_code=415,
             detail=error_payload(
                 "unsupported_file_type",
-                "Choose a WAV, MP3, M4A, AAC, FLAC, OGG, or OPUS recording.",
+                "Choose a WAV, MP3, M4A, AAC, FLAC, OGG, OPUS, or WebM recording.",
             )["error"],
         )
 
@@ -103,7 +185,7 @@ async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
         )
 
     try:
-        result = await asyncio.to_thread(
+        result = await run_inference(
             detector.process_file_bytes, bytes(contents), filename
         )
     except (AudioDecodeError, AudioValidationError) as exc:
@@ -122,6 +204,13 @@ async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
             "filename": filename,
             "content_type": file.content_type,
             "analysis": result,
+            "analysis_metadata": {
+                "analyzed_at": datetime.now(UTC).isoformat(),
+                "sha256": hashlib.sha256(contents).hexdigest(),
+                "model": detector.model_name,
+                "model_revision": detector.model_revision,
+                "service_version": app.version,
+            },
         }
     )
 
@@ -134,6 +223,10 @@ async def send_ws_error(websocket: WebSocket, code: str, message: str) -> None:
 
 @app.websocket("/ws/stream")
 async def websocket_stream(websocket: WebSocket) -> None:
+    if not websocket_origin_allowed(websocket):
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     await websocket.send_json(
         {
@@ -153,6 +246,14 @@ async def websocket_stream(websocket: WebSocket) -> None:
                 break
 
             if message.get("text") is not None:
+                if len(message["text"].encode("utf-8")) > MAX_STREAM_SETUP_BYTES:
+                    await send_ws_error(
+                        websocket,
+                        "message_too_large",
+                        "Stream setup message is too large.",
+                    )
+                    await websocket.close(code=1009)
+                    return
                 try:
                     payload = json.loads(message["text"])
                 except json.JSONDecodeError:
@@ -181,7 +282,7 @@ async def websocket_stream(websocket: WebSocket) -> None:
                     {
                         "type": "state",
                         "state": "listening",
-                        "message": "Listening for a clear speech sample…",
+                        "message": "Listening for a clear speech sample...",
                     }
                 )
                 continue
@@ -199,6 +300,14 @@ async def websocket_stream(websocket: WebSocket) -> None:
                     websocket, "invalid_pcm", "Received an invalid PCM audio frame."
                 )
                 continue
+            if len(data) > MAX_STREAM_FRAME_BYTES:
+                await send_ws_error(
+                    websocket,
+                    "frame_too_large",
+                    f"Live audio frames must be {MAX_STREAM_FRAME_BYTES // 1024} KB or smaller.",
+                )
+                await websocket.close(code=1009)
+                return
 
             buffer.extend(data)
             if len(buffer) > MAX_STREAM_BUFFER_BYTES:
@@ -213,12 +322,12 @@ async def websocket_stream(websocket: WebSocket) -> None:
                         {
                             "type": "state",
                             "state": "loading_model",
-                            "message": "Preparing the detector. The first run can take a few minutes…",
+                            "message": "Preparing the detector. The first run can take a few minutes...",
                         }
                     )
 
                 try:
-                    result = await asyncio.to_thread(
+                    result = await run_inference(
                         detector.process_raw_pcm, chunk, STREAM_SAMPLE_RATE
                     )
                 except AudioValidationError as exc:

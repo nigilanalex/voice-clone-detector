@@ -48,7 +48,7 @@ class VoiceCloneDetector:
     DEFAULT_MODEL_REVISION = "c66306024a7ede0be291e9c4558b37634782dc4e"
     TARGET_SAMPLE_RATE = 16_000
     MIN_AUDIO_SECONDS = 1.0
-    MAX_AUDIO_SECONDS = 10 * 60
+    MAX_AUDIO_SECONDS = 30 * 60
     FILE_WINDOW_SECONDS = 6.0
     MAX_FILE_WINDOWS = 5
 
@@ -323,7 +323,10 @@ class VoiceCloneDetector:
                 f"Use at least {self.MIN_AUDIO_SECONDS:.0f} second of speech."
             )
         if duration > self.MAX_AUDIO_SECONDS:
-            raise AudioValidationError("Audio must be 10 minutes or shorter.")
+            max_minutes = self.MAX_AUDIO_SECONDS // 60
+            raise AudioValidationError(
+                f"Audio must be {max_minutes} minutes or shorter."
+            )
 
         quality = self._audio_quality(audio, sr)
         dsp_metrics = self._extract_dsp_features(audio, sr)
@@ -332,6 +335,8 @@ class VoiceCloneDetector:
                 "status": "INSUFFICIENT AUDIO",
                 "risk_score": None,
                 "confidence_score": None,
+                "decision_strength": None,
+                "score_spread": None,
                 "summary": quality["message"],
                 "analysis_windows": 0,
                 "window_scores": [],
@@ -342,15 +347,21 @@ class VoiceCloneDetector:
 
         windows = self._select_windows(audio, sr)
         probabilities = self._infer_probabilities(windows, sr)
-        # Mean aggregation is less vulnerable to one noisy window than max scoring.
-        fake_probability = float(np.mean(probabilities))
+        # Median aggregation prevents one noisy or silent window from dominating a
+        # longer recording while retaining the individual scores for review.
+        fake_probability = float(np.median(probabilities))
         status, summary = self._classification(fake_probability)
-        confidence = max(fake_probability, 1.0 - fake_probability)
+        decision_strength = abs(fake_probability - 0.5) * 2.0
+        score_spread = max(probabilities) - min(probabilities)
 
         return {
             "status": status,
             "risk_score": round(fake_probability * 100, 1),
-            "confidence_score": round(confidence * 100, 1),
+            # Kept for client compatibility; this is distance from the 50% decision
+            # boundary, not a calibrated statistical confidence interval.
+            "confidence_score": round(decision_strength * 100, 1),
+            "decision_strength": round(decision_strength * 100, 1),
+            "score_spread": round(score_spread * 100, 1),
             "summary": summary,
             "analysis_windows": len(probabilities),
             "window_scores": [round(value * 100, 1) for value in probabilities],
@@ -363,7 +374,9 @@ class VoiceCloneDetector:
         """Decode a recording, preserving its suffix for optional FFmpeg codecs."""
 
         suffix = Path(filename).suffix.lower()
-        if suffix not in {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus"}:
+        if suffix not in {
+            ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".webm"
+        }:
             suffix = ".audio"
 
         try:
@@ -390,7 +403,7 @@ class VoiceCloneDetector:
                     audio_data, sr = self._decode_with_bundled_ffmpeg(file_bytes)
         except Exception as exc:
             raise AudioDecodeError(
-                "The recording could not be decoded. Try WAV, MP3, M4A, FLAC, or OGG."
+                "The recording could not be decoded. Try WAV, MP3, M4A, WebM, FLAC, or OGG."
             ) from exc
 
         return self.predict(audio_data, sr=sr)
