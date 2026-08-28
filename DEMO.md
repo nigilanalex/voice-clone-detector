@@ -14,10 +14,10 @@
 2. Select **Load high-risk scenario** under Security context.
 3. Upload the prepared AI-generated recording and select **Analyze recording**.
 4. Show the model risk, decision strength, pitch, pauses, window timeline, and file fingerprint.
-5. Show the combined impersonation risk and recommended security response.
-6. Explain that notifications and transaction holds are labelled simulations; audio analysis and policy scoring are real.
+5. Show the combined impersonation risk, recommended response, and verified evidence-chain hash.
+6. Explain that transaction holds are simulations; audio analysis, policy scoring, audit storage, and configured email/webhook alerts are real.
 7. Download the evidence report to show the complete JSON audit record.
-8. Open **Dashboard view** to show the real backend, model, compute, transport, and version state.
+8. Open **Dashboard view** to show the real backend, model, compute, transport, version, and audit-chain integrity.
 
 ## Optional reference comparison
 
@@ -29,4 +29,4 @@ Live microphone mode is experimental and replay through a room or phone speaker 
 
 ## Short explanation
 
-> VoiceGuard uses a pinned Wav2Vec2 model to screen recorded and near-live speech for synthetic patterns. It adds acoustic diagnostics and transparent contextual rules to turn a model signal into an actionable impersonation-risk workflow. External alerts and transaction controls are simulated for the hackathon, while the audio analysis, evidence report, and policy calculation are real.
+> VoiceGuard uses a pinned Wav2Vec2 model to screen recorded and near-live speech for synthetic patterns. It adds acoustic diagnostics and transparent contextual rules to turn a model signal into an actionable impersonation-risk workflow. Audit records and configured email or webhook alerts are real; banking transaction controls remain simulated.

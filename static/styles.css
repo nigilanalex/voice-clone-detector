@@ -1855,6 +1855,7 @@ footer {
 .alert-strip { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 7px; }
 .alert-strip span { padding: 6px 9px; border: 1px solid rgba(255, 189, 92, 0.22); border-radius: 99px; color: #ffcf82; font-size: 9px; }
 .workflow-panel .simulation-label { grid-column: 1 / -1; color: #ffbd5c; font-size: 9px; letter-spacing: 0.04em; }
+.workflow-panel .integration-status { grid-column: 1 / -1; padding-top: 8px; border-top: 1px solid rgba(119, 154, 193, 0.13); color: #8fc8ff; font-size: 9px; }
 .speaker-panel { display: grid; gap: 5px; margin-top: 10px; padding: 13px 15px; border: 1px solid rgba(157, 123, 255, 0.2); border-radius: 13px; background: rgba(157, 123, 255, 0.06); }
 .speaker-panel span { color: #bda8ff; font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; }
 .speaker-panel strong { font-size: 13px; }

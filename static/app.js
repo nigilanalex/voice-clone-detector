@@ -18,6 +18,7 @@
         dashboardDevice: $("dashboard-device"),
         dashboardTransport: $("dashboard-transport"),
         dashboardVersion: $("dashboard-version"),
+        dashboardAudit: $("dashboard-audit"),
         consentCheckbox: $("consent-checkbox"),
         uploadForm: $("upload-form"),
         audioInput: $("audio-input"),
@@ -68,12 +69,14 @@
         workflowAction: $("workflow-action"),
         workflowReasons: $("workflow-reasons"),
         workflowAlerts: $("workflow-alerts"),
+        integrationStatus: $("integration-status"),
         speakerPanel: $("speaker-panel"),
         speakerResult: $("speaker-result"),
         speakerWarning: $("speaker-warning"),
         reliabilityChip: $("reliability-chip"),
         windowTimeline: $("window-timeline"),
         fileFingerprint: $("file-fingerprint"),
+        evidenceChain: $("evidence-chain"),
         downloadReport: $("download-report"),
         copySummary: $("copy-summary"),
         historyList: $("history-list"),
@@ -222,7 +225,10 @@
             elements.dashboardModelName.textContent = String(payload?.model?.model || "Pinned Wav2Vec2").split("/").pop();
             elements.dashboardDevice.textContent = String(payload?.model?.device || "CPU").toUpperCase();
             elements.dashboardTransport.textContent = window.isSecureContext ? "HTTPS + WSS" : "Local HTTP + WS";
-            elements.dashboardVersion.textContent = payload?.version || "2.0.2";
+            elements.dashboardVersion.textContent = payload?.version || "2.2.0";
+            elements.dashboardAudit.textContent = payload?.audit_store?.chain_valid
+                ? `Verified · ${payload.audit_store.chain_records} records`
+                : "Integrity check failed";
             elements.serviceState.classList.add("online");
             elements.serviceState.classList.remove("offline");
             elements.serviceStateText.textContent = uploadState.modelReady
@@ -236,6 +242,7 @@
             elements.dashboardModel.textContent = "Unavailable";
             elements.dashboardDevice.textContent = "—";
             elements.dashboardTransport.textContent = "Disconnected";
+            elements.dashboardAudit.textContent = "Unavailable";
             elements.serviceState.classList.add("offline");
             elements.serviceState.classList.remove("online");
             elements.serviceStateText.textContent = "Service offline";
@@ -394,7 +401,7 @@
         renderHistory();
     }
 
-    function renderSecurityWorkflow(workflow, comparison) {
+    function renderSecurityWorkflow(workflow, comparison, integrations) {
         elements.workflowPanel.hidden = !workflow;
         if (workflow) {
             const score = Number(workflow.combined_risk_score);
@@ -416,6 +423,21 @@
                 item.textContent = alert;
                 elements.workflowAlerts.append(item);
             });
+            const delivered = (integrations?.deliveries || [])
+                .filter((item) => item.status === "delivered")
+                .map((item) => item.channel);
+            const failed = (integrations?.deliveries || [])
+                .filter((item) => item.status === "failed")
+                .map((item) => item.channel);
+            if (delivered.length) {
+                elements.integrationStatus.textContent = `Real external alert delivered through: ${delivered.join(", ")}. Metadata only; no audio was shared.`;
+            } else if (failed.length) {
+                elements.integrationStatus.textContent = `External delivery failed for: ${failed.join(", ")}. Analysis and local audit remain available.`;
+            } else {
+                elements.integrationStatus.textContent = integrations?.audit_recorded
+                    ? "Incident metadata saved to the local audit database. External alerts are not configured."
+                    : "External alerts are not configured; displayed notification actions are simulations.";
+            }
         }
 
         elements.speakerPanel.hidden = !comparison;
@@ -473,8 +495,12 @@
         elements.fileFingerprint.textContent = metadata.sha256
             ? `${metadata.sha256.slice(0, 16)}…`
             : "Unavailable";
+        const chainHash = extras.externalIntegrations?.evidence_chain?.record_hash;
+        elements.evidenceChain.textContent = chainHash
+            ? `${chainHash.slice(0, 16)}… · ${extras.externalIntegrations.chain_verified ? "verified" : "check failed"}`
+            : "Audit unavailable";
         renderTimeline(analysis.window_scores);
-        renderSecurityWorkflow(extras.securityWorkflow, extras.speakerComparison);
+        renderSecurityWorkflow(extras.securityWorkflow, extras.speakerComparison, extras.externalIntegrations);
         uploadState.lastReport = {
             report_type: "VoiceGuard screening evidence",
             filename,
@@ -485,6 +511,7 @@
             context: extras.context || {},
             speaker_comparison: extras.speakerComparison || null,
             security_workflow: extras.securityWorkflow || null,
+            external_integrations: extras.externalIntegrations || null,
         };
         saveHistory(uploadState.lastReport);
         elements.feedbackStatus.textContent = "Feedback stays on this device and never includes audio.";
@@ -534,6 +561,7 @@
                 context: payload.context,
                 securityWorkflow: payload.security_workflow,
                 speakerComparison: payload.speaker_comparison,
+                externalIntegrations: payload.external_integrations,
             });
             elements.serviceStateText.textContent = "Detector ready";
             elements.serviceState.title = "Detector model is loaded";

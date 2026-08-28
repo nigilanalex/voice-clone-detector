@@ -23,7 +23,9 @@
                 <li>The current application does not create user accounts or an audio archive.</li>
             </ul>
             <h2>Result metadata</h2>
-            <p>Recent scan history is stored only in your browser and contains filenames, timestamps, file fingerprints, and results—not audio. You can clear it from the main screen.</p>
+            <p>Recent scan history is stored in your browser and contains filenames, timestamps, file fingerprints, and results—not audio. You can clear it from the main screen.</p>
+            <p>The server also keeps a metadata-only SQLite incident audit containing a generated incident ID, file hash, risk scores, scenario, selected risk flags, recommended action, delivery status, and tamper-evident chain hashes. It does not contain audio or filenames.</p>
+            <p>If an administrator configures email or an HTTPS webhook, HIGH and CRITICAL incident metadata may be sent to that provider. VoiceGuard never includes the recording or filename in those alerts.</p>
             <h2>Operational data</h2>
             <p>The hosting provider may process standard connection information such as IP addresses, request times, and error logs for security and reliability. Review the hosting provider’s policy before operating a public deployment.</p>
             <h2>Your choices</h2>

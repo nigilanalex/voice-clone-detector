@@ -10,8 +10,8 @@
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.webmanifest">
-    <link rel="stylesheet" href="/static/styles.css?v=2.0.2">
-    <script src="/static/app.js?v=2.0.2" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=2.2.0">
+    <script src="/static/app.js?v=2.2.0" defer></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -178,7 +178,7 @@
 
                             <fieldset class="context-panel">
                                 <legend>Security context <span>Hackathon workflow</span></legend>
-                                <p>Combine the real audio result with reported call context. External actions are simulated; language selection is evaluation metadata and does not mean the model is calibrated for that language.</p>
+                                <p>Combine the real audio result with reported call context. Banking and telecom actions are simulated; configured email or webhook alerts can be real. Language selection is evaluation metadata and does not mean the model is calibrated for that language.</p>
                                 <div class="demo-preset">
                                     <div><strong>Presentation shortcut</strong><span>Loads a suspicious fund-transfer context without generating a fake detector result.</span></div>
                                     <button class="button button-quiet" id="demo-preset-button" type="button">Load high-risk scenario</button>
@@ -270,7 +270,8 @@
                                 </div>
                                 <ul id="workflow-reasons"></ul>
                                 <div class="alert-strip" id="workflow-alerts"></div>
-                                <p class="simulation-label">SIMULATION: external notifications and transaction controls are demonstration events only.</p>
+                                <p class="simulation-label">TRANSACTION CONTROLS ARE SIMULATED. Email and webhook alerts are real only when configured; delivery status appears below.</p>
+                                <p class="integration-status" id="integration-status">External delivery status will appear after analysis.</p>
                             </section>
                             <section class="speaker-panel" id="speaker-panel" hidden>
                                 <span>Experimental voice-reference comparison</span>
@@ -286,6 +287,10 @@
                                 <div class="fingerprint-row">
                                     <span>File fingerprint</span>
                                     <code id="file-fingerprint">Unavailable</code>
+                                </div>
+                                <div class="fingerprint-row">
+                                    <span>Tamper-evident chain</span>
+                                    <code id="evidence-chain">Unavailable</code>
                                 </div>
                             </div>
                             <div class="result-actions">
@@ -387,7 +392,7 @@
                         <article><span>Compute</span><strong id="dashboard-device">—</strong><small>Single bounded worker</small></article>
                         <article><span>Live transport</span><strong id="dashboard-transport">—</strong><small>Rolling 16 kHz PCM</small></article>
                         <article><span>Version</span><strong id="dashboard-version">—</strong><small>Reproducible model revision</small></article>
-                        <article><span>Privacy</span><strong>Audio not archived</strong><small>Metadata history stays local</small></article>
+                        <article><span>Evidence integrity</span><strong id="dashboard-audit">Checking</strong><small>Tamper-evident metadata chain</small></article>
                     </div>
                     <p class="dashboard-note">The dashboard reports actual backend state. It is not a prerecorded animation.</p>
                 </section>

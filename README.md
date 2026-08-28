@@ -26,7 +26,8 @@ VoiceGuard is a full-stack AI voice-clone screening MVP. It supports:
 - Pitch, pause, and spectral diagnostics for an explainable prosody demo
 - Optional trusted-reference voice comparison using an experimental MFCC heuristic
 - Context-aware impersonation scoring for transfer, credential, and data scenarios
-- Simulated security alerts, supervisor escalation, and transaction-hold workflows
+- Optional real email/webhook alerts plus simulated transaction-hold workflows
+- Tamper-evident SHA-256 audit chain with a verifiable hash in every report
 
 The detector is decision support, not proof that a speaker is genuine or fraudulent.
 Live microphone detection is experimental: replay, echo, call codecs, compression,
@@ -84,11 +85,11 @@ Later starts use the local Hugging Face cache.
 ## Hackathon security workflow
 
 The upload screen includes an end-to-end impersonation-response demonstration. Its
-audio model, DSP measurements, file fingerprint, and contextual policy calculation
-are real. SMS/email notifications, supervisor escalation, transaction holds, and
-telephony integration are simulated UI events because no external bank, telecom, or
-messaging account is connected. Every simulated event is labelled in the interface
-and JSON evidence report.
+audio model, DSP measurements, file fingerprint, contextual policy calculation, and
+SQLite metadata audit are real. Configured SMTP email and HTTPS webhook notifications
+are also real. Transaction holds and telephony integration remain simulated because
+no bank or telecom platform is connected. Every simulated event is labelled in the
+interface and JSON evidence report.
 
 The optional voice-reference score is a lightweight acoustic similarity heuristic,
 not biometric authentication. Language selection records evaluation context but does
@@ -153,6 +154,40 @@ Optional environment variables:
     VOICEGUARD_POLICY_HIGH=45
     VOICEGUARD_POLICY_CRITICAL=70
 
+### Audit database and real external alerts
+
+VoiceGuard now writes metadata-only incident records to `data/voiceguard.db` using
+SQLite. The default retention period is 30 days. The database never stores audio or
+filenames and is excluded from Git. Configure a different writable path or retention:
+
+    $env:VOICEGUARD_AUDIT_DB="D:\voiceguard-data\voiceguard.db"
+    $env:VOICEGUARD_AUDIT_RETENTION_DAYS="30"
+
+HIGH and CRITICAL events can send real metadata-only notifications through an HTTPS
+webhook, SMTP email, or both. Analysis continues even if a provider is unavailable.
+
+    $env:VOICEGUARD_ALERT_WEBHOOK_URL="https://your-automation-endpoint.example/hook"
+    $env:VOICEGUARD_SMTP_HOST="smtp.example.com"
+    $env:VOICEGUARD_SMTP_PORT="587"
+    $env:VOICEGUARD_SMTP_USERNAME="voiceguard@example.com"
+    $env:VOICEGUARD_SMTP_PASSWORD="use-a-provider-app-password"
+    $env:VOICEGUARD_ALERT_FROM="voiceguard@example.com"
+    $env:VOICEGUARD_ALERT_TO="security@example.com"
+
+Set environment variables in the same terminal before starting Uvicorn. `.env.example`
+documents every integration variable; `.env` is ignored by Git. Never commit secrets.
+Webhook payloads include `text` and `content` fields plus a structured incident object,
+making them suitable for common automation, Slack-compatible, and Discord-compatible
+HTTPS endpoints.
+
+Each audit row is cryptographically linked to the previous row using SHA-256. The
+result screen and downloaded report expose the incident's chain hash, while the system
+dashboard verifies internal chain consistency. Modification, reordering, or deletion
+inside the retained chain causes verification to fail. Keeping a downloaded report or
+external webhook copy of the latest hash also provides an external anchor that can
+reveal database truncation. This is tamper evidence, not prevention: an administrator
+with full server access can still replace the entire database and its external anchors.
+
 The revision is pinned by default so the reviewed class mapping and model weights do
 not silently change.
 
@@ -167,11 +202,14 @@ not silently change.
 - Run inference in a dedicated worker or GPU service.
 - Evaluate and calibrate the detector on the exact languages and call codecs in use.
 - Keep a human verification path; never block or accuse someone from one score alone.
+- Protect and back up the SQLite audit path, or replace it with PostgreSQL when
+  deploying multiple application replicas.
 
 ## Project layout
 
     app.py                     FastAPI routes and WebSocket protocol
     model_engine.py            Audio decoding, validation, DSP, and model inference
+    integrations.py            SQLite audit, HTTPS webhook, and SMTP alert adapters
     requirements.txt           Python runtime dependencies
     static/index.html          Accessible application UI
     static/styles.css          Responsive offline-ready design

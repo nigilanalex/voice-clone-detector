@@ -27,6 +27,8 @@ from fastapi import (
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from integrations import AlertDispatcher, AuditStore
+
 from model_engine import (
     AudioDecodeError,
     AudioValidationError,
@@ -87,9 +89,14 @@ class SlidingWindowRateLimiter:
 app = FastAPI(
     title="VoiceGuard AI",
     description="Probabilistic AI-generated voice screening for recordings and live microphone audio.",
-    version="2.0.2",
+    version="2.2.0",
 )
 detector = VoiceCloneDetector()
+audit_store = AuditStore(
+    Path(os.getenv("VOICEGUARD_AUDIT_DB", BASE_DIR / "data" / "voiceguard.db")),
+    positive_env_int("VOICEGUARD_AUDIT_RETENTION_DAYS", 30),
+)
+alert_dispatcher = AlertDispatcher()
 inference_slots = asyncio.Semaphore(MAX_CONCURRENT_INFERENCES)
 rate_limiter = SlidingWindowRateLimiter()
 model_warmup_task: asyncio.Task[None] | None = None
@@ -199,11 +206,11 @@ def assess_impersonation_risk(
     if score >= POLICY_CRITICAL_THRESHOLD:
         level = "CRITICAL"
         action = "Pause the workflow, block the sensitive action, and escalate to security."
-        alerts = ["In-app critical alert", "Simulated security-team notification", "Simulated transaction hold"]
+        alerts = ["In-app critical alert", "Security-team notification requested", "Simulated transaction hold"]
     elif score >= POLICY_HIGH_THRESHOLD:
         level = "HIGH"
         action = "Require an independent callback and multifactor verification before continuing."
-        alerts = ["In-app warning", "Simulated supervisor notification"]
+        alerts = ["In-app warning", "Supervisor notification requested"]
     elif score >= POLICY_MEDIUM_THRESHOLD:
         level = "MEDIUM"
         action = "Continue cautiously and verify unusual requests through a trusted channel."
@@ -279,6 +286,7 @@ async def get_service_worker() -> FileResponse:
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
+    chain_status = await asyncio.to_thread(audit_store.verify_chain)
     return {
         "status": "ok",
         "service": "VoiceGuard AI",
@@ -304,8 +312,15 @@ async def health() -> dict[str, Any]:
             "contextual_risk_policy": True,
             "prosody_diagnostics": True,
             "speaker_reference_comparison": "experimental",
-            "external_alerts": "simulated",
+            "external_alerts": alert_dispatcher.status(),
             "telephony_integration": "simulated",
+        },
+        "audit_store": {
+            "type": "sqlite_metadata_only",
+            "retention_days": audit_store.retention_days,
+            "audio_stored": False,
+            "chain_valid": chain_status["valid"],
+            "chain_records": chain_status["records"],
         },
     }
 
@@ -419,6 +434,26 @@ async def analyze_file(
         new_beneficiary=new_beneficiary,
         speaker_similarity=(speaker_comparison or {}).get("similarity_score"),
     )
+    audio_sha256 = hashlib.sha256(contents).hexdigest()
+    incident = {
+        "incident_id": str(uuid4()),
+        "detected_at": datetime.now(UTC).isoformat(),
+        "audio_sha256": audio_sha256,
+        "ai_risk": result.get("risk_score"),
+        "combined_risk": workflow["combined_risk_score"],
+        "risk_level": workflow["risk_level"],
+        "scenario": scenario,
+        "call_origin": call_origin,
+        "risk_flags": {
+            "urgency": urgency,
+            "sensitive_request": sensitive_request,
+            "new_beneficiary": new_beneficiary,
+        },
+        "recommended_action": workflow["recommended_action"],
+    }
+    deliveries = await asyncio.to_thread(alert_dispatcher.dispatch, incident)
+    audit_result = await asyncio.to_thread(audit_store.record, incident, deliveries)
+    chain_status = await asyncio.to_thread(audit_store.verify_chain)
 
     return JSONResponse(
         {
@@ -427,6 +462,14 @@ async def analyze_file(
             "analysis": result,
             "speaker_comparison": speaker_comparison,
             "security_workflow": workflow,
+            "external_integrations": {
+                "incident_id": incident["incident_id"],
+                "audit_recorded": audit_result["recorded"],
+                "evidence_chain": audit_result,
+                "chain_verified": chain_status["valid"],
+                "audio_shared": False,
+                "deliveries": deliveries,
+            },
             "context": {
                 "scenario": scenario,
                 "call_origin": call_origin,
@@ -437,8 +480,8 @@ async def analyze_file(
                 "language_validation": "not_calibrated" if language != "unspecified" else "not_selected",
             },
             "analysis_metadata": {
-                "analyzed_at": datetime.now(UTC).isoformat(),
-                "sha256": hashlib.sha256(contents).hexdigest(),
+                "analyzed_at": incident["detected_at"],
+                "sha256": audio_sha256,
                 "model": detector.model_name,
                 "model_revision": detector.model_revision,
                 "service_version": app.version,
