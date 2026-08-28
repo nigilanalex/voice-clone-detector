@@ -10,8 +10,8 @@
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.webmanifest">
-    <link rel="stylesheet" href="/static/styles.css?v=2.0.0">
-    <script src="/static/app.js?v=2.0.0" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=2.0.1">
+    <script src="/static/app.js?v=2.0.1" defer></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -179,6 +179,11 @@
                             <fieldset class="context-panel">
                                 <legend>Security context <span>Hackathon workflow</span></legend>
                                 <p>Combine the real audio result with reported call context. External actions are simulated; language selection is evaluation metadata and does not mean the model is calibrated for that language.</p>
+                                <div class="demo-preset">
+                                    <div><strong>Presentation shortcut</strong><span>Loads a suspicious fund-transfer context without generating a fake detector result.</span></div>
+                                    <button class="button button-quiet" id="demo-preset-button" type="button">Load high-risk scenario</button>
+                                    <button class="button button-quiet" id="demo-reset-button" type="button" hidden>Reset scenario</button>
+                                </div>
                                 <div class="context-grid">
                                     <label>Scenario
                                         <select id="scenario-input">

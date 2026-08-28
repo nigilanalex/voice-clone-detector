@@ -32,6 +32,9 @@ The detector is decision support, not proof that a speaker is genuine or fraudul
 Live microphone detection is experimental: replay, echo, call codecs, compression,
 and microphone processing can produce false negatives.
 
+For a reliable presentation sequence, prepared audio guidance, and a two-minute
+script, see [DEMO.md](DEMO.md).
+
 ## Run locally
 
 Python 3.11 or 3.12 is recommended.

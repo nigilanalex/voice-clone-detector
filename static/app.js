@@ -59,6 +59,8 @@
         sensitiveInput: $("sensitive-input"),
         beneficiaryInput: $("beneficiary-input"),
         referenceInput: $("reference-input"),
+        demoPresetButton: $("demo-preset-button"),
+        demoResetButton: $("demo-reset-button"),
         workflowPanel: $("workflow-panel"),
         workflowScore: $("workflow-score"),
         workflowLevel: $("workflow-level"),
@@ -219,7 +221,7 @@
             elements.dashboardModelName.textContent = String(payload?.model?.model || "Pinned Wav2Vec2").split("/").pop();
             elements.dashboardDevice.textContent = String(payload?.model?.device || "CPU").toUpperCase();
             elements.dashboardTransport.textContent = window.isSecureContext ? "HTTPS + WSS" : "Local HTTP + WS";
-            elements.dashboardVersion.textContent = payload?.version || "2.0.0";
+            elements.dashboardVersion.textContent = payload?.version || "2.0.1";
             elements.serviceState.classList.add("online");
             elements.serviceState.classList.remove("offline");
             elements.serviceStateText.textContent = uploadState.modelReady
@@ -1152,6 +1154,30 @@
     }
 
     function setupShowcase() {
+        elements.demoPresetButton.addEventListener("click", () => {
+            elements.scenarioInput.value = "fund_transfer";
+            elements.callOriginInput.value = "spoofed";
+            elements.languageInput.value = "english";
+            elements.urgencyInput.checked = true;
+            elements.sensitiveInput.checked = true;
+            elements.beneficiaryInput.checked = true;
+            elements.demoPresetButton.textContent = "High-risk scenario loaded";
+            elements.demoPresetButton.disabled = true;
+            elements.demoResetButton.hidden = false;
+        });
+
+        elements.demoResetButton.addEventListener("click", () => {
+            elements.scenarioInput.value = "general";
+            elements.callOriginInput.value = "known";
+            elements.languageInput.value = "unspecified";
+            elements.urgencyInput.checked = false;
+            elements.sensitiveInput.checked = false;
+            elements.beneficiaryInput.checked = false;
+            elements.demoPresetButton.textContent = "Load high-risk scenario";
+            elements.demoPresetButton.disabled = false;
+            elements.demoResetButton.hidden = true;
+        });
+
         elements.dashboardButton.addEventListener("click", () => {
             const enabled = !document.body.classList.contains("dashboard-mode");
             document.body.classList.toggle("dashboard-mode", enabled);
