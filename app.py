@@ -17,6 +17,7 @@ from uuid import uuid4
 from fastapi import (
     FastAPI,
     File,
+    Form,
     HTTPException,
     Request,
     UploadFile,
@@ -60,6 +61,9 @@ MAX_CONCURRENT_INFERENCES = positive_env_int(
 )
 UPLOAD_RATE_LIMIT = positive_env_int("VOICEGUARD_UPLOADS_PER_5_MINUTES", 12)
 WEBSOCKET_RATE_LIMIT = positive_env_int("VOICEGUARD_STREAMS_PER_MINUTE", 8)
+POLICY_MEDIUM_THRESHOLD = positive_env_int("VOICEGUARD_POLICY_MEDIUM", 25)
+POLICY_HIGH_THRESHOLD = positive_env_int("VOICEGUARD_POLICY_HIGH", 45)
+POLICY_CRITICAL_THRESHOLD = positive_env_int("VOICEGUARD_POLICY_CRITICAL", 70)
 
 
 class SlidingWindowRateLimiter:
@@ -83,7 +87,7 @@ class SlidingWindowRateLimiter:
 app = FastAPI(
     title="VoiceGuard AI",
     description="Probabilistic AI-generated voice screening for recordings and live microphone audio.",
-    version="1.4.2",
+    version="2.0.0",
 )
 detector = VoiceCloneDetector()
 inference_slots = asyncio.Semaphore(MAX_CONCURRENT_INFERENCES)
@@ -149,6 +153,80 @@ async def add_security_headers(request: Request, call_next):
 
 def error_payload(code: str, message: str) -> dict[str, Any]:
     return {"error": {"code": code, "message": message}}
+
+
+def assess_impersonation_risk(
+    ai_risk: float | None,
+    *,
+    scenario: str = "general",
+    call_origin: str = "known",
+    urgency: bool = False,
+    sensitive_request: bool = False,
+    new_beneficiary: bool = False,
+    speaker_similarity: float | None = None,
+) -> dict[str, Any]:
+    """Combine model evidence with transparent hackathon policy rules."""
+
+    model_component = max(0.0, min(100.0, ai_risk or 0.0)) * 0.65
+    reasons: list[str] = []
+    context_points = 0.0
+
+    origin_points = {"known": 0, "unknown": 10, "international": 14, "spoofed": 22}
+    context_points += origin_points.get(call_origin, 10)
+    if call_origin != "known":
+        reasons.append(f"Call origin marked as {call_origin}.")
+    if scenario in {"fund_transfer", "credential_reset", "confidential_data"}:
+        context_points += 10
+        reasons.append("The request involves a high-impact workflow.")
+    if urgency:
+        context_points += 10
+        reasons.append("Urgency or pressure language was reported.")
+    if sensitive_request:
+        context_points += 12
+        reasons.append("Sensitive information or approval was requested.")
+    if new_beneficiary:
+        context_points += 12
+        reasons.append("The destination or beneficiary is new.")
+    if speaker_similarity is not None and speaker_similarity < 65:
+        context_points += 16
+        reasons.append("The experimental reference comparison found a possible mismatch.")
+    if ai_risk is not None and ai_risk >= 70:
+        reasons.insert(0, "The audio model detected strong synthetic-voice patterns.")
+    elif ai_risk is not None and ai_risk >= 40:
+        reasons.insert(0, "The audio model returned an uncertain synthetic-voice signal.")
+
+    score = round(min(100.0, model_component + context_points), 1)
+    if score >= POLICY_CRITICAL_THRESHOLD:
+        level = "CRITICAL"
+        action = "Pause the workflow, block the sensitive action, and escalate to security."
+        alerts = ["In-app critical alert", "Simulated security-team notification", "Simulated transaction hold"]
+    elif score >= POLICY_HIGH_THRESHOLD:
+        level = "HIGH"
+        action = "Require an independent callback and multifactor verification before continuing."
+        alerts = ["In-app warning", "Simulated supervisor notification"]
+    elif score >= POLICY_MEDIUM_THRESHOLD:
+        level = "MEDIUM"
+        action = "Continue cautiously and verify unusual requests through a trusted channel."
+        alerts = ["In-app caution"]
+    else:
+        level = "LOW"
+        action = "No strong combined signal was found; continue normal verification procedures."
+        alerts = ["In-app status"]
+
+    return {
+        "combined_risk_score": score,
+        "risk_level": level,
+        "recommended_action": action,
+        "reasons": reasons or ["No additional contextual risk indicators were selected."],
+        "alerts": alerts,
+        "simulation": True,
+        "policy_version": "hackathon-policy-v1",
+        "thresholds": {
+            "medium": POLICY_MEDIUM_THRESHOLD,
+            "high": POLICY_HIGH_THRESHOLD,
+            "critical": POLICY_CRITICAL_THRESHOLD,
+        },
+    }
 
 
 async def run_inference(function, *args):
@@ -222,6 +300,13 @@ async def health() -> dict[str, Any]:
             "window_seconds": STREAM_WINDOW_BYTES // (STREAM_SAMPLE_RATE * 2),
             "hop_seconds": STREAM_HOP_BYTES // (STREAM_SAMPLE_RATE * 2),
         },
+        "hackathon_capabilities": {
+            "contextual_risk_policy": True,
+            "prosody_diagnostics": True,
+            "speaker_reference_comparison": "experimental",
+            "external_alerts": "simulated",
+            "telephony_integration": "simulated",
+        },
     }
 
 
@@ -239,7 +324,16 @@ async def readiness() -> JSONResponse:
 
 
 @app.post("/api/analyze-file")
-async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
+async def analyze_file(
+    file: UploadFile = File(...),
+    reference: UploadFile | None = File(None),
+    scenario: str = Form("general"),
+    call_origin: str = Form("known"),
+    urgency: bool = Form(False),
+    sensitive_request: bool = Form(False),
+    new_beneficiary: bool = Form(False),
+    language: str = Form("unspecified"),
+) -> JSONResponse:
     filename = file.filename or "recording"
     extension = Path(filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
@@ -271,11 +365,39 @@ async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
             detail=error_payload("empty_file", "The selected recording is empty.")["error"],
         )
 
+    reference_contents = bytearray()
+    reference_filename = ""
+    if reference and reference.filename:
+        reference_filename = reference.filename
+        reference_extension = Path(reference_filename).suffix.lower()
+        if reference_extension not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=415, detail=error_payload(
+                "unsupported_reference_type", "Choose a supported audio file for the voice reference."
+            )["error"])
+        try:
+            while chunk := await reference.read(1024 * 1024):
+                reference_contents.extend(chunk)
+                if len(reference_contents) > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail=error_payload(
+                        "reference_too_large", "The voice reference must be 25 MB or smaller."
+                    )["error"])
+        finally:
+            await reference.close()
+
     try:
         inference_started = time.perf_counter()
         result = await run_inference(
             detector.process_file_bytes, bytes(contents), filename
         )
+        speaker_comparison = None
+        if reference_contents:
+            speaker_comparison = await run_inference(
+                detector.compare_speakers,
+                bytes(contents),
+                filename,
+                bytes(reference_contents),
+                reference_filename,
+            )
         processing_ms = round((time.perf_counter() - inference_started) * 1000)
     except (AudioDecodeError, AudioValidationError) as exc:
         raise HTTPException(
@@ -288,11 +410,32 @@ async def analyze_file(file: UploadFile = File(...)) -> JSONResponse:
             detail=error_payload("model_unavailable", str(exc))["error"],
         ) from exc
 
+    workflow = assess_impersonation_risk(
+        result.get("risk_score"),
+        scenario=scenario,
+        call_origin=call_origin,
+        urgency=urgency,
+        sensitive_request=sensitive_request,
+        new_beneficiary=new_beneficiary,
+        speaker_similarity=(speaker_comparison or {}).get("similarity_score"),
+    )
+
     return JSONResponse(
         {
             "filename": filename,
             "content_type": file.content_type,
             "analysis": result,
+            "speaker_comparison": speaker_comparison,
+            "security_workflow": workflow,
+            "context": {
+                "scenario": scenario,
+                "call_origin": call_origin,
+                "urgency": urgency,
+                "sensitive_request": sensitive_request,
+                "new_beneficiary": new_beneficiary,
+                "language": language,
+                "language_validation": "not_calibrated" if language != "unspecified" else "not_selected",
+            },
             "analysis_metadata": {
                 "analyzed_at": datetime.now(UTC).isoformat(),
                 "sha256": hashlib.sha256(contents).hexdigest(),

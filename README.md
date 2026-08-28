@@ -23,6 +23,10 @@ VoiceGuard is a full-stack AI voice-clone screening MVP. It supports:
 - Private, metadata-only scan history stored in the user's browser
 - System dashboard with real backend, model, device, transport, and version state
 - Measured server processing time and local result-quality feedback
+- Pitch, pause, and spectral diagnostics for an explainable prosody demo
+- Optional trusted-reference voice comparison using an experimental MFCC heuristic
+- Context-aware impersonation scoring for transfer, credential, and data scenarios
+- Simulated security alerts, supervisor escalation, and transaction-hold workflows
 
 The detector is decision support, not proof that a speaker is genuine or fraudulent.
 Live microphone detection is experimental: replay, echo, call codecs, compression,
@@ -69,7 +73,23 @@ Later starts use the local Hugging Face cache.
 3. Up to five six-second windows are selected across a long recording.
 4. The pinned Wav2Vec2 classifier scores each window using the checkpoint's declared
    fake label; VoiceGuard uses the median score to reduce the effect of one outlier.
-5. Basic signal measurements report whether the sample is too quiet or clipping.
+5. Signal measurements report audio quality, spectrum, pitch variation, and pauses.
+6. Optional MFCC similarity compares the sample with a consented reference recording.
+7. A transparent policy combines the AI score with caller origin, urgency, workflow,
+   sensitive-request, and new-beneficiary indicators.
+
+## Hackathon security workflow
+
+The upload screen includes an end-to-end impersonation-response demonstration. Its
+audio model, DSP measurements, file fingerprint, and contextual policy calculation
+are real. SMS/email notifications, supervisor escalation, transaction holds, and
+telephony integration are simulated UI events because no external bank, telecom, or
+messaging account is connected. Every simulated event is labelled in the interface
+and JSON evidence report.
+
+The optional voice-reference score is a lightweight acoustic similarity heuristic,
+not biometric authentication. Language selection records evaluation context but does
+not claim that the model has been calibrated for that language or accent.
 
 The displayed decision strength is the score's distance from the 50% decision
 boundary. It is not a calibrated statistical confidence interval. Window variation
@@ -126,6 +146,9 @@ Optional environment variables:
     VOICEGUARD_MAX_CONCURRENT_INFERENCES=1
     VOICEGUARD_UPLOADS_PER_5_MINUTES=12
     VOICEGUARD_STREAMS_PER_MINUTE=8
+    VOICEGUARD_POLICY_MEDIUM=25
+    VOICEGUARD_POLICY_HIGH=45
+    VOICEGUARD_POLICY_CRITICAL=70
 
 The revision is pinned by default so the reviewed class mapping and model weights do
 not silently change.

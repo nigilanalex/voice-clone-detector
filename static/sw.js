@@ -1,8 +1,8 @@
-const CACHE_NAME = "voiceguard-shell-v9";
+const CACHE_NAME = "voiceguard-shell-v10";
 const APP_SHELL = [
     "/",
-    "/static/styles.css?v=1.4.2",
-    "/static/app.js?v=1.4.2",
+    "/static/styles.css?v=2.0.0",
+    "/static/app.js?v=2.0.0",
     "/static/pcm-worklet.js",
     "/static/manifest.webmanifest",
     "/static/icon.svg",

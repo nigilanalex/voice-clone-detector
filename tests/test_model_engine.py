@@ -90,6 +90,15 @@ class VoiceCloneDetectorTests(unittest.TestCase):
             )
         )
 
+    def test_dsp_features_include_prosody_measurements(self):
+        sr = VoiceCloneDetector.TARGET_SAMPLE_RATE
+        timeline = np.arange(sr * 2, dtype=np.float32) / sr
+        audio = 0.2 * np.sin(2 * np.pi * 180 * timeline)
+        metrics = self.detector._extract_dsp_features(audio, sr)
+        self.assertIn("pitch_median_hz", metrics)
+        self.assertIn("pitch_variation", metrics)
+        self.assertIn("pause_ratio", metrics)
+
 
 if __name__ == "__main__":
     unittest.main()

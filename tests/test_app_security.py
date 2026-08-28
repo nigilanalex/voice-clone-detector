@@ -3,6 +3,7 @@ import unittest
 from app import (
     ALLOWED_EXTENSIONS,
     SlidingWindowRateLimiter,
+    assess_impersonation_risk,
     client_key,
     websocket_origin_allowed,
 )
@@ -14,6 +15,24 @@ class DummyWebSocket:
 
 
 class AppSecurityTests(unittest.TestCase):
+    def test_context_policy_escalates_high_impact_synthetic_call(self):
+        result = assess_impersonation_risk(
+            90,
+            scenario="fund_transfer",
+            call_origin="spoofed",
+            urgency=True,
+            sensitive_request=True,
+            new_beneficiary=True,
+            speaker_similarity=40,
+        )
+        self.assertEqual(result["risk_level"], "CRITICAL")
+        self.assertTrue(result["simulation"])
+        self.assertGreaterEqual(result["combined_risk_score"], 70)
+
+    def test_context_policy_keeps_low_risk_call_low(self):
+        result = assess_impersonation_risk(10, call_origin="known")
+        self.assertEqual(result["risk_level"], "LOW")
+
     def test_browser_websocket_accepts_same_origin(self):
         websocket = DummyWebSocket(
             {"origin": "https://voiceguard.example", "host": "voiceguard.example"}

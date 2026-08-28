@@ -50,6 +50,24 @@
         metricWindows: $("metric-windows"),
         metricFormat: $("metric-format"),
         metricProcessing: $("metric-processing"),
+        metricPitch: $("metric-pitch"),
+        metricPauses: $("metric-pauses"),
+        scenarioInput: $("scenario-input"),
+        callOriginInput: $("call-origin-input"),
+        languageInput: $("language-input"),
+        urgencyInput: $("urgency-input"),
+        sensitiveInput: $("sensitive-input"),
+        beneficiaryInput: $("beneficiary-input"),
+        referenceInput: $("reference-input"),
+        workflowPanel: $("workflow-panel"),
+        workflowScore: $("workflow-score"),
+        workflowLevel: $("workflow-level"),
+        workflowAction: $("workflow-action"),
+        workflowReasons: $("workflow-reasons"),
+        workflowAlerts: $("workflow-alerts"),
+        speakerPanel: $("speaker-panel"),
+        speakerResult: $("speaker-result"),
+        speakerWarning: $("speaker-warning"),
         reliabilityChip: $("reliability-chip"),
         windowTimeline: $("window-timeline"),
         fileFingerprint: $("file-fingerprint"),
@@ -201,7 +219,7 @@
             elements.dashboardModelName.textContent = String(payload?.model?.model || "Pinned Wav2Vec2").split("/").pop();
             elements.dashboardDevice.textContent = String(payload?.model?.device || "CPU").toUpperCase();
             elements.dashboardTransport.textContent = window.isSecureContext ? "HTTPS + WSS" : "Local HTTP + WS";
-            elements.dashboardVersion.textContent = payload?.version || "1.4.2";
+            elements.dashboardVersion.textContent = payload?.version || "2.0.0";
             elements.serviceState.classList.add("online");
             elements.serviceState.classList.remove("offline");
             elements.serviceStateText.textContent = uploadState.modelReady
@@ -373,7 +391,38 @@
         renderHistory();
     }
 
-    function renderFileResult(analysis, filename, metadata = {}) {
+    function renderSecurityWorkflow(workflow, comparison) {
+        elements.workflowPanel.hidden = !workflow;
+        if (workflow) {
+            const score = Number(workflow.combined_risk_score);
+            const tone = resultTone(workflow.risk_level, score);
+            elements.workflowScore.textContent = Number.isFinite(score) ? `${Math.round(score)}%` : "—";
+            elements.workflowScore.style.color = tone.color;
+            elements.workflowLevel.className = `verdict ${tone.className}`;
+            elements.workflowLevel.textContent = workflow.risk_level || "ASSESSED";
+            elements.workflowAction.textContent = workflow.recommended_action || "Review the result.";
+            elements.workflowReasons.replaceChildren();
+            (workflow.reasons || []).forEach((reason) => {
+                const item = document.createElement("li");
+                item.textContent = reason;
+                elements.workflowReasons.append(item);
+            });
+            elements.workflowAlerts.replaceChildren();
+            (workflow.alerts || []).forEach((alert) => {
+                const item = document.createElement("span");
+                item.textContent = alert;
+                elements.workflowAlerts.append(item);
+            });
+        }
+
+        elements.speakerPanel.hidden = !comparison;
+        if (comparison) {
+            elements.speakerResult.textContent = `${comparison.assessment} · ${comparison.similarity_score}%`;
+            elements.speakerWarning.textContent = comparison.warning || "Experimental comparison only.";
+        }
+    }
+
+    function renderFileResult(analysis, filename, metadata = {}, extras = {}) {
         const score = Number.isFinite(analysis.risk_score) ? analysis.risk_score : null;
         const tone = resultTone(analysis.status, score);
         elements.fileScore.textContent = score === null ? "—" : `${Math.round(score)}%`;
@@ -406,6 +455,12 @@
         elements.metricProcessing.textContent = Number.isFinite(metadata.processing_ms)
             ? `${(metadata.processing_ms / 1000).toFixed(2)} seconds`
             : "Not available";
+        elements.metricPitch.textContent = Number.isFinite(analysis.dsp_metrics?.pitch_median_hz)
+            ? `${analysis.dsp_metrics.pitch_median_hz} Hz`
+            : "Not available";
+        elements.metricPauses.textContent = Number.isFinite(analysis.dsp_metrics?.pause_ratio)
+            ? `${Math.round(analysis.dsp_metrics.pause_ratio * 100)}%`
+            : "Not available";
         const reliability = reliabilityFor(analysis);
         elements.reliabilityChip.className = `reliability-chip ${reliability.className}`;
         elements.reliabilityChip.textContent = reliability.label;
@@ -413,6 +468,7 @@
             ? `${metadata.sha256.slice(0, 16)}…`
             : "Unavailable";
         renderTimeline(analysis.window_scores);
+        renderSecurityWorkflow(extras.securityWorkflow, extras.speakerComparison);
         uploadState.lastReport = {
             report_type: "VoiceGuard screening evidence",
             filename,
@@ -420,6 +476,9 @@
             reliability: reliability.label,
             capture_warning: "Replay, room acoustics, codecs, and unseen voice generators can change detection accuracy.",
             analysis,
+            context: extras.context || {},
+            speaker_comparison: extras.speakerComparison || null,
+            security_workflow: extras.securityWorkflow || null,
         };
         saveHistory(uploadState.lastReport);
         elements.feedbackStatus.textContent = "Feedback stays on this device and never includes audio.";
@@ -446,6 +505,15 @@
 
         const body = new FormData();
         body.append("file", uploadState.file);
+        body.append("scenario", elements.scenarioInput.value);
+        body.append("call_origin", elements.callOriginInput.value);
+        body.append("language", elements.languageInput.value);
+        body.append("urgency", String(elements.urgencyInput.checked));
+        body.append("sensitive_request", String(elements.sensitiveInput.checked));
+        body.append("new_beneficiary", String(elements.beneficiaryInput.checked));
+        if (elements.referenceInput.files[0]) {
+            body.append("reference", elements.referenceInput.files[0]);
+        }
 
         try {
             const response = await fetch("/api/analyze-file", {
@@ -456,7 +524,11 @@
             if (!response.ok) throw new Error(await parseError(response));
             const payload = await response.json();
             uploadState.modelReady = true;
-            renderFileResult(payload.analysis, payload.filename, payload.analysis_metadata || {});
+            renderFileResult(payload.analysis, payload.filename, payload.analysis_metadata || {}, {
+                context: payload.context,
+                securityWorkflow: payload.security_workflow,
+                speakerComparison: payload.speaker_comparison,
+            });
             elements.serviceStateText.textContent = "Detector ready";
             elements.serviceState.title = "Detector model is loaded";
         } catch (error) {

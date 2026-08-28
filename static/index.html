@@ -10,8 +10,8 @@
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.webmanifest">
-    <link rel="stylesheet" href="/static/styles.css?v=1.4.2">
-    <script src="/static/app.js?v=1.4.2" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=2.0.0">
+    <script src="/static/app.js?v=2.0.0" defer></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -176,6 +176,48 @@
 
                             <div class="inline-message error-message" id="file-error" role="alert" tabindex="-1" hidden></div>
 
+                            <fieldset class="context-panel">
+                                <legend>Security context <span>Hackathon workflow</span></legend>
+                                <p>Combine the real audio result with reported call context. External actions are simulated; language selection is evaluation metadata and does not mean the model is calibrated for that language.</p>
+                                <div class="context-grid">
+                                    <label>Scenario
+                                        <select id="scenario-input">
+                                            <option value="general">General conversation</option>
+                                            <option value="fund_transfer">Fund transfer approval</option>
+                                            <option value="credential_reset">Credential reset</option>
+                                            <option value="confidential_data">Confidential data request</option>
+                                        </select>
+                                    </label>
+                                    <label>Call origin
+                                        <select id="call-origin-input">
+                                            <option value="known">Known contact</option>
+                                            <option value="unknown">Unknown caller</option>
+                                            <option value="international">Unexpected international call</option>
+                                            <option value="spoofed">Suspected spoofed caller ID</option>
+                                        </select>
+                                    </label>
+                                    <label>Language
+                                        <select id="language-input">
+                                            <option value="unspecified">Not specified</option>
+                                            <option value="english">English</option>
+                                            <option value="hindi">Hindi</option>
+                                            <option value="tamil">Tamil</option>
+                                            <option value="telugu">Telugu</option>
+                                            <option value="other_indian">Other Indian language</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="context-checks">
+                                    <label><input id="urgency-input" type="checkbox"> Urgent or pressuring request</label>
+                                    <label><input id="sensitive-input" type="checkbox"> Sensitive information or approval</label>
+                                    <label><input id="beneficiary-input" type="checkbox"> New beneficiary or destination</label>
+                                </div>
+                                <label class="reference-upload">Optional trusted voice reference
+                                    <input id="reference-input" type="file" accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm,audio/*">
+                                    <small>Experimental MFCC similarity—not biometric identity proof. Use only with permission.</small>
+                                </label>
+                            </fieldset>
+
                             <button class="button button-primary action-button" id="analyze-button" type="submit" disabled>
                                 <span class="button-label">
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h3l2-6 4 12 2.5-7H20"/></svg>
@@ -207,7 +249,28 @@
                                 <div><dt>Analysis windows</dt><dd id="metric-windows">—</dd></div>
                                 <div><dt>Source format</dt><dd id="metric-format">—</dd></div>
                                 <div><dt>Processing time</dt><dd id="metric-processing">Waiting</dd></div>
+                                <div><dt>Median pitch</dt><dd id="metric-pitch">—</dd></div>
+                                <div><dt>Pause ratio</dt><dd id="metric-pauses">—</dd></div>
                             </dl>
+                            <section class="workflow-panel" id="workflow-panel" aria-labelledby="workflow-title" hidden>
+                                <div class="workflow-score">
+                                    <span>Combined impersonation risk</span>
+                                    <strong id="workflow-score">—</strong>
+                                </div>
+                                <div>
+                                    <span class="verdict neutral" id="workflow-level">Waiting</span>
+                                    <h4 id="workflow-title">Security response workflow</h4>
+                                    <p id="workflow-action"></p>
+                                </div>
+                                <ul id="workflow-reasons"></ul>
+                                <div class="alert-strip" id="workflow-alerts"></div>
+                                <p class="simulation-label">SIMULATION: external notifications and transaction controls are demonstration events only.</p>
+                            </section>
+                            <section class="speaker-panel" id="speaker-panel" hidden>
+                                <span>Experimental voice-reference comparison</span>
+                                <strong id="speaker-result">—</strong>
+                                <p id="speaker-warning"></p>
+                            </section>
                             <div class="forensic-panel">
                                 <div class="forensic-heading">
                                     <div><span>FORENSIC TIMELINE</span><strong>AI risk by sampled window</strong></div>

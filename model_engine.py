@@ -233,24 +233,55 @@ class VoiceCloneDetector:
 
     @staticmethod
     def _extract_dsp_features(audio_data: np.ndarray, sr: int) -> dict[str, float]:
-        """Return explainable signal measurements; these are not verdicts."""
+        """Return explainable spectral and prosody measurements, not verdicts."""
+
+        # Bound diagnostic work on long uploads; classification windows are selected
+        # separately across the full recording.
+        diagnostic_audio = audio_data[: sr * 30]
 
         rolloff = float(
             np.mean(
                 librosa.feature.spectral_rolloff(
-                    y=audio_data, sr=sr, roll_percent=0.85
+                    y=diagnostic_audio, sr=sr, roll_percent=0.85
                 )
             )
         )
-        zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=audio_data)))
+        zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=diagnostic_audio)))
         centroid = float(
-            np.mean(librosa.feature.spectral_centroid(y=audio_data, sr=sr))
+            np.mean(librosa.feature.spectral_centroid(y=diagnostic_audio, sr=sr))
         )
+        frame_rms = librosa.feature.rms(y=diagnostic_audio, frame_length=1024, hop_length=256)[0]
+        active_threshold = max(float(np.median(frame_rms)) * 0.35, 1e-5)
+        pause_ratio = float(np.mean(frame_rms < active_threshold))
+
+        try:
+            pitch = librosa.yin(
+                diagnostic_audio,
+                fmin=65,
+                fmax=500,
+                sr=sr,
+                frame_length=1024,
+                hop_length=256,
+            )
+            active_pitch = pitch[frame_rms[: len(pitch)] >= active_threshold]
+            active_pitch = active_pitch[np.isfinite(active_pitch)]
+            pitch_median = float(np.median(active_pitch)) if active_pitch.size else 0.0
+            pitch_variation = (
+                float(np.std(active_pitch) / max(np.mean(active_pitch), 1e-8))
+                if active_pitch.size
+                else 0.0
+            )
+        except Exception:
+            pitch_median = 0.0
+            pitch_variation = 0.0
 
         return {
             "spectral_rolloff": round(rolloff, 2),
             "zero_crossing_rate": round(zcr, 4),
             "spectral_centroid": round(centroid, 2),
+            "pitch_median_hz": round(pitch_median, 2),
+            "pitch_variation": round(pitch_variation, 4),
+            "pause_ratio": round(pause_ratio, 4),
         }
 
     def _select_windows(self, audio_data: np.ndarray, sr: int) -> list[np.ndarray]:
@@ -370,7 +401,9 @@ class VoiceCloneDetector:
             "disclaimer": "Screening result only; do not use as identity proof.",
         }
 
-    def process_file_bytes(self, file_bytes: bytes, filename: str = "audio.wav") -> dict[str, Any]:
+    def decode_file_bytes(
+        self, file_bytes: bytes, filename: str = "audio.wav"
+    ) -> tuple[np.ndarray, int]:
         """Decode a recording, preserving its suffix for optional FFmpeg codecs."""
 
         suffix = Path(filename).suffix.lower()
@@ -406,7 +439,53 @@ class VoiceCloneDetector:
                 "The recording could not be decoded. Try WAV, MP3, M4A, WebM, FLAC, or OGG."
             ) from exc
 
+        return self._ensure_mono_float(audio_data), sr
+
+    def process_file_bytes(self, file_bytes: bytes, filename: str = "audio.wav") -> dict[str, Any]:
+        audio_data, sr = self.decode_file_bytes(file_bytes, filename)
         return self.predict(audio_data, sr=sr)
+
+    @staticmethod
+    def _speaker_signature(audio_data: np.ndarray, sr: int) -> np.ndarray:
+        """Create a lightweight MFCC signature for a hackathon comparison demo."""
+
+        mfcc = librosa.feature.mfcc(y=audio_data, sr=sr, n_mfcc=20)
+        signature = np.concatenate((np.mean(mfcc, axis=1), np.std(mfcc, axis=1)))
+        norm = float(np.linalg.norm(signature))
+        if norm <= 1e-8:
+            raise AudioValidationError("The speaker reference does not contain usable speech.")
+        return signature / norm
+
+    def compare_speakers(
+        self,
+        sample_bytes: bytes,
+        sample_filename: str,
+        reference_bytes: bytes,
+        reference_filename: str,
+    ) -> dict[str, Any]:
+        """Compare two voices using an explicitly experimental acoustic heuristic."""
+
+        sample, sample_sr = self.decode_file_bytes(sample_bytes, sample_filename)
+        reference, reference_sr = self.decode_file_bytes(reference_bytes, reference_filename)
+        sample_signature = self._speaker_signature(sample, sample_sr)
+        reference_signature = self._speaker_signature(reference, reference_sr)
+        similarity = float(np.clip(np.dot(sample_signature, reference_signature), 0.0, 1.0))
+        score = round(similarity * 100, 1)
+        if score >= 82:
+            assessment = "CONSISTENT"
+        elif score >= 65:
+            assessment = "INCONCLUSIVE"
+        else:
+            assessment = "POSSIBLE MISMATCH"
+        return {
+            "similarity_score": score,
+            "assessment": assessment,
+            "method": "experimental_mfcc_similarity",
+            "warning": (
+                "Hackathon heuristic only; this is not biometric identity verification. "
+                "Noise, phrases, codecs, and replay can change the score."
+            ),
+        }
 
     def _decode_with_bundled_ffmpeg(self, file_bytes: bytes) -> tuple[np.ndarray, int]:
         """Decode mobile formats through imageio-ffmpeg's bundled executable."""
