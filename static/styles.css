@@ -1029,6 +1029,9 @@ h1 em {
 .result-copy h4 {
     margin: 8px 0 4px;
     font-size: 16px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .result-copy p {

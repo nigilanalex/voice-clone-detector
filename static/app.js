@@ -52,6 +52,7 @@
         metricProcessing: $("metric-processing"),
         metricPitch: $("metric-pitch"),
         metricPauses: $("metric-pauses"),
+        metricPitchVariation: $("metric-pitch-variation"),
         scenarioInput: $("scenario-input"),
         callOriginInput: $("call-origin-input"),
         languageInput: $("language-input"),
@@ -221,7 +222,7 @@
             elements.dashboardModelName.textContent = String(payload?.model?.model || "Pinned Wav2Vec2").split("/").pop();
             elements.dashboardDevice.textContent = String(payload?.model?.device || "CPU").toUpperCase();
             elements.dashboardTransport.textContent = window.isSecureContext ? "HTTPS + WSS" : "Local HTTP + WS";
-            elements.dashboardVersion.textContent = payload?.version || "2.0.1";
+            elements.dashboardVersion.textContent = payload?.version || "2.0.2";
             elements.serviceState.classList.add("online");
             elements.serviceState.classList.remove("offline");
             elements.serviceStateText.textContent = uploadState.modelReady
@@ -462,6 +463,9 @@
             : "Not available";
         elements.metricPauses.textContent = Number.isFinite(analysis.dsp_metrics?.pause_ratio)
             ? `${Math.round(analysis.dsp_metrics.pause_ratio * 100)}%`
+            : "Not available";
+        elements.metricPitchVariation.textContent = Number.isFinite(analysis.dsp_metrics?.pitch_variation)
+            ? `${Math.round(analysis.dsp_metrics.pitch_variation * 100)}%`
             : "Not available";
         const reliability = reliabilityFor(analysis);
         elements.reliabilityChip.className = `reliability-chip ${reliability.className}`;
